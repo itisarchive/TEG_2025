@@ -6,25 +6,24 @@ A simple RAG (Retrieval Augmented Generation) system using in-memory vector stor
 This script demonstrates the core RAG concepts without external vector databases.
 """
 
+from dotenv import load_dotenv
 from langchain_community.document_loaders import DirectoryLoader
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 
-from dotenv import load_dotenv
-load_dotenv(override=True) # Load environment variables from .env file, override if already set
-
+load_dotenv(override=True)  # Load environment variables from .env file, override if already set
 
 # 1. Load documents
 print("Loading documents...")
-loader = DirectoryLoader("data/scientists_bios")
+loader = DirectoryLoader("src/3. Retrieval Augmented Generation/01_basic_rag/data/scientists_bios")
 docs = loader.load()
 print(f"Loaded {len(docs)} documents")
 
 # 2. Create embeddings and vector store
-embeddings = OpenAIEmbeddings()
+embeddings = AzureOpenAIEmbeddings(model="text-embedding-3-small")
 vector_store = InMemoryVectorStore(embeddings)
 vector_store.add_documents(documents=docs)
 
@@ -32,7 +31,7 @@ vector_store.add_documents(documents=docs)
 retriever = vector_store.as_retriever()
 
 # 4. Create LLM
-llm = ChatOpenAI(model="gpt-5-nano")
+llm = AzureChatOpenAI(model="gpt-5-nano")
 
 # 5. Create prompt template
 prompt = ChatPromptTemplate.from_template("""
@@ -50,10 +49,10 @@ Answer:
 
 # 6. Create RAG chain
 rag_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
+        {"context": retriever, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
 )
 
 # Answer a single question using the RAG system
@@ -62,12 +61,12 @@ response = rag_chain.invoke(question)
 print(f"Q: {question}")
 print(f"A: {response}")
 
-
 # Sample questions for testing
 questions = [
     "What was Ada Lovelace's contribution to computer programming?",
     "How did Einstein develop his theory of relativity?",
-    "What was Newton's most important discovery?"
+    "What was Newton's most important discovery?",
+    "How come Karol Nawrocki became the president of Poland?"
 ]
 
 # Answer multiple questions using the RAG system
