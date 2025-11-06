@@ -1,0 +1,32 @@
+python 3.13
+dotenv
+built-in python packages
+common python packages (numpy, sklearn, pandas, matplotlib, seaborn etc.)
+AzureOpenAI and AzureChatOpenAI, all available models
+100$ in Azure credits
+system prompts
+user prompts
+temperatures
+max_completion_tokens
+top_p
+streamlit
+
+embeddings
+text-embedding-3-small
+langchain
+OllamaLLM
+ChatPromptTemplate
+
+AzureOpenAIEmbeddings, all available models
+InMemoryVectorStore
+DirectoryLoader
+rag_chains (with retrievers, RunnablePassthrough, prompt, llm and StrOutputParser)
+RecursiveCharacterTextSplitter (chunking)
+Chroma vector stroe
+FAISS vector store
+TextLoader
+PyPDFLoader
+WebBaseLoader
+requests
+BeautifulSoup
+User-Agent with ordinary headers
