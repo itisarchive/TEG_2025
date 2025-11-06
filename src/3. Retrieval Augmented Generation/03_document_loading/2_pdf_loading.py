@@ -7,7 +7,7 @@ Shows PDF creation, loading, and comparison with text-based approaches.
 """
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -22,7 +22,9 @@ from reportlab.lib.enums import TA_LEFT
 import os
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
+
 
 def create_pdf_from_text(text_file_path, pdf_file_path):
     """Convert a text file to PDF for demonstration purposes."""
@@ -77,20 +79,21 @@ def create_pdf_from_text(text_file_path, pdf_file_path):
     doc.build(story)
     print(f"   ✅ Created PDF: {pdf_file_path}")
 
+
 print("📄 PDF DOCUMENT LOADING DEMONSTRATION")
-print("="*50)
+print("=" * 50)
 
 # 1. Create PDF versions of text files for demonstration
 print("\n1️⃣ Creating PDF files from text sources:")
 
 # Create PDFs directory if it doesn't exist
-pdf_dir = "data/pdfs"
+pdf_dir = "src/3. Retrieval Augmented Generation/03_document_loading/data/pdfs"
 os.makedirs(pdf_dir, exist_ok=True)
 
 # Convert some text files to PDF
 text_files = [
-    "data/scientists_bios/Ada Lovelace.txt",
-    "data/scientists_bios/Albert Einstein.txt"
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Ada Lovelace.txt",
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Albert Einstein.txt"
 ]
 
 pdf_files = []
@@ -121,7 +124,7 @@ for pdf_file in pdf_files:
 
     # Show page information
     for i, page in enumerate(pdf_docs):
-        print(f"      Page {i+1}: {len(page.page_content)} characters")
+        print(f"      Page {i + 1}: {len(page.page_content)} characters")
         print(f"      Metadata: {page.metadata}")
 
     pdf_documents.extend(pdf_docs)
@@ -132,7 +135,7 @@ print(f"\n   Total PDF documents loaded: {len(pdf_documents)}")
 print("\n3️⃣ Comparing PDF vs Text loading:")
 
 # Load the same content as text
-text_loader = TextLoader("data/scientists_bios/Ada Lovelace.txt")
+text_loader = TextLoader("src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Ada Lovelace.txt")
 text_doc = text_loader.load()[0]
 
 # Find corresponding PDF
@@ -173,12 +176,12 @@ for scientist, count in chunk_by_source.items():
 # 5. Create RAG System with PDF Documents
 print("\n5️⃣ Creating RAG system with PDF documents:")
 
-embeddings = OpenAIEmbeddings()
+embeddings = AzureOpenAIEmbeddings(model="text-embedding-3-small")
 pdf_vector_store = InMemoryVectorStore(embeddings)
 pdf_vector_store.add_documents(documents=pdf_chunks)
 
 pdf_retriever = pdf_vector_store.as_retriever(search_kwargs={"k": 3})
-llm = ChatOpenAI(model="gpt-5-nano")
+llm = AzureChatOpenAI(model="gpt-5-nano")
 
 prompt = ChatPromptTemplate.from_template("""
 You are an assistant for question-answering tasks.
@@ -195,10 +198,10 @@ Answer:
 """)
 
 pdf_rag_chain = (
-    {"context": pdf_retriever, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
+        {"context": pdf_retriever, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
 )
 
 # 6. Test PDF RAG System
@@ -217,7 +220,7 @@ for i, question in enumerate(test_questions, 1):
 
 # 7. PDF Loading Best Practices
 print("\n📋 PDF LOADING BEST PRACTICES")
-print("="*50)
+print("=" * 50)
 
 print("✅ Advantages of PDF Loading:")
 print("  • Preserves document structure and formatting")

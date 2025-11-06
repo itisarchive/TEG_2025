@@ -7,7 +7,7 @@ Shows web scraping, URL processing, and handling web-based content.
 """
 
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -18,7 +18,9 @@ from bs4 import BeautifulSoup
 import time
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
+
 
 def check_url_accessibility(url):
     """Check if a URL is accessible before processing."""
@@ -43,8 +45,9 @@ def check_url_accessibility(url):
         print(f"   🔍 Debug: {url} failed with unexpected error: {str(e)}")
         return False
 
+
 print("🌐 WEB SOURCES LOADING DEMONSTRATION")
-print("="*50)
+print("=" * 50)
 
 # 1. Define Wikipedia URLs for our scientists
 print("\n1️⃣ Setting up web sources:")
@@ -109,12 +112,14 @@ if accessible_urls:
 
 else:
     print("   ❌ FATAL ERROR: No web sources are accessible.")
-    raise RuntimeError("Cannot proceed: No accessible web sources found. Web loading demonstration requires internet access to Wikipedia.")
+    raise RuntimeError(
+        "Cannot proceed: No accessible web sources found. Web loading demonstration requires internet access to Wikipedia.")
 
 print(f"\n   Total web documents loaded: {len(web_documents)}")
 
 # 4. Clean and Process Web Content
 print("\n4️⃣ Processing web content:")
+
 
 # Enhanced web content cleaning using BeautifulSoup
 def clean_web_content_with_bs4(text, source_url):
@@ -143,6 +148,7 @@ def clean_web_content_with_bs4(text, source_url):
         print(f"   ⚠️ Cleaning failed for {source_url}: {str(e)}")
         return ' '.join(text.split()).strip()
 
+
 def extract_structured_content(html_content, source_url):
     """Extract basic structured content."""
     try:
@@ -167,6 +173,7 @@ def extract_structured_content(html_content, source_url):
     except Exception as e:
         print(f"   ⚠️ Extraction failed for {source_url}: {str(e)}")
         return None
+
 
 # Clean web content
 for doc in web_documents:
@@ -246,12 +253,12 @@ for scientist, count in chunk_distribution.items():
 # 7. Create Web-based RAG System
 print("\n7️⃣ Creating web-based RAG system:")
 
-embeddings = OpenAIEmbeddings()
+embeddings = AzureOpenAIEmbeddings(model="text-embedding-3-small")
 web_vector_store = InMemoryVectorStore(embeddings)
 web_vector_store.add_documents(documents=web_chunks)
 
 web_retriever = web_vector_store.as_retriever(search_kwargs={"k": 4})
-llm = ChatOpenAI(model="gpt-4o-mini")
+llm = AzureChatOpenAI(model="gpt-4o-mini")
 
 prompt = ChatPromptTemplate.from_template("""
 You are an assistant for question-answering tasks.
@@ -268,10 +275,10 @@ Answer:
 """)
 
 web_rag_chain = (
-    {"context": web_retriever, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
+        {"context": web_retriever, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
 )
 
 # 8. Test Web RAG System
@@ -292,7 +299,6 @@ for i, question in enumerate(web_questions, 1):
     except Exception as e:
         print(f"A{i}: Error processing question: {str(e)}")
 
-
 if web_documents:
     sample_doc = web_documents[0]
     headings_count = len(sample_doc.metadata.get('headings', []))
@@ -303,7 +309,7 @@ if web_documents:
 
 # 9. Web Loading Best Practices and Considerations
 print("\n🌐 WEB LOADING BEST PRACTICES")
-print("="*50)
+print("=" * 50)
 
 print("✅ Web Loading Advantages:")
 print("  • Access to up-to-date information")

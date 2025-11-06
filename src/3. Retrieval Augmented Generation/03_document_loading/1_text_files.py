@@ -7,22 +7,23 @@ Shows single file, multiple files, and directory-based loading patterns.
 """
 
 from langchain_community.document_loaders import TextLoader, DirectoryLoader
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 print("📄 TEXT FILE LOADING DEMONSTRATION")
-print("="*50)
+print("=" * 50)
 
 # 1. Single File Loading
 print("\n1️⃣ Loading a single text file:")
-single_file_loader = TextLoader("data/scientists_bios/Ada Lovelace.txt")
+single_file_loader = TextLoader(
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Ada Lovelace.txt")
 single_doc = single_file_loader.load()
 
 print(f"   Loaded: {len(single_doc)} document")
@@ -33,9 +34,9 @@ print(f"   Preview: {single_doc[0].page_content[:200]}...")
 # 2. Multiple Specific Files
 print("\n2️⃣ Loading multiple specific files:")
 files_to_load = [
-    "data/scientists_bios/Ada Lovelace.txt",
-    "data/scientists_bios/Albert Einstein.txt",
-    "data/scientists_bios/Isaac Newton.txt"
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Ada Lovelace.txt",
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Albert Einstein.txt",
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios/Isaac Newton.txt"
 ]
 
 multiple_docs = []
@@ -47,22 +48,22 @@ for file_path in files_to_load:
 print(f"   Loaded: {len(multiple_docs)} documents")
 for i, doc in enumerate(multiple_docs):
     scientist_name = doc.metadata['source'].split('/')[-1].replace('.txt', '')
-    print(f"   File {i+1}: {scientist_name} ({len(doc.page_content)} chars)")
+    print(f"   File {i + 1}: {scientist_name} ({len(doc.page_content)} chars)")
 
 # 3. Directory Loading (All Files)
 print("\n3️⃣ Loading entire directory:")
-directory_loader = DirectoryLoader("data/scientists_bios")
+directory_loader = DirectoryLoader("src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios")
 all_docs = directory_loader.load()
 
 print(f"   Loaded: {len(all_docs)} documents from directory")
 for i, doc in enumerate(all_docs):
     scientist_name = doc.metadata['source'].split('/')[-1].replace('.txt', '')
-    print(f"   Document {i+1}: {scientist_name} ({len(doc.page_content)} chars)")
+    print(f"   Document {i + 1}: {scientist_name} ({len(doc.page_content)} chars)")
 
 # 4. Directory Loading with File Pattern
 print("\n4️⃣ Loading with glob pattern (*.txt files only):")
 pattern_loader = DirectoryLoader(
-    "data/scientists_bios",
+    "src/3. Retrieval Augmented Generation/03_document_loading/data/scientists_bios",
     glob="*.txt"
 )
 pattern_docs = pattern_loader.load()
@@ -93,12 +94,12 @@ for scientist, count in chunk_distribution.items():
 
 # 6. Create RAG System with Different Loading Approaches
 print("\n6️⃣ Creating RAG system:")
-embeddings = OpenAIEmbeddings()
+embeddings = AzureOpenAIEmbeddings(model="text-embedding-3-small")
 vector_store = InMemoryVectorStore(embeddings)
 vector_store.add_documents(documents=all_chunks)
 
 retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-llm = ChatOpenAI(model="gpt-5-nano")
+llm = AzureChatOpenAI(model="gpt-5-nano")
 
 prompt = ChatPromptTemplate.from_template("""
 You are an assistant for question-answering tasks.
@@ -114,10 +115,10 @@ Answer:
 """)
 
 text_rag_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
+        {"context": retriever, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
 )
 
 # Test with questions about different scientists
@@ -136,7 +137,7 @@ for i, question in enumerate(test_questions, 1):
 
 # 7. Comparison of Loading Methods
 print("\n📊 LOADING METHOD COMPARISON")
-print("="*50)
+print("=" * 50)
 print("Method 1 - Single File:")
 print("  ✅ Precise control over content")
 print("  ✅ Fast for specific documents")
