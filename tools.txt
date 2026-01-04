@@ -1,78 +1,133 @@
-python 3.13
-dotenv
-built-in python packages
-common python packages (numpy, sklearn, pandas, matplotlib, seaborn etc.)
-AzureOpenAI and AzureChatOpenAI, all available models
-100$ in Azure credits
-system prompts
-user prompts
-temperatures
-max_completion_tokens
-top_p
-streamlit
+## Wstęp i ustawienia (Module 1)
 
-embeddings
-text-embedding-3-small
-langchain
-OllamaLLM
-ChatPromptTemplate
+python 3.13 – wersja runtime używana w projekcie
+built-in python packages – standardowa biblioteka Pythona (os, json, pathlib itd.)
+common python packages (numpy, pandas, sklearn, matplotlib, seaborn) – analiza danych, ML i wizualizacja
+dotenv – ładowanie zmiennych środowiskowych z plików .env
+System prompt – globalna rola i zachowanie asystenta
+User prompt – zapytanie użytkownika
+Temperature – sterowanie losowością odpowiedzi
+Top_p – próbkowanie jądrowe jako alternatywa lub uzupełnienie temperature
+Max completion tokens – maksymalna długość odpowiedzi
+Zaawansowane parametry – łączenie temperature i top_p
+Token usage & cost – liczenie tokenów i kosztów
+Streamlit chatbot – prosty interfejs webowy
+Streamlit session & memory – przechowywanie historii rozmowy
 
-RAGs
-AzureOpenAIEmbeddings, all available models
-InMemoryVectorStore
-DirectoryLoader
-rag_chains (with retrievers, RunnablePassthrough, prompt, llm and StrOutputParser)
-RecursiveCharacterTextSplitter (chunking)
-Chroma vector stroe
-FAISS vector store
-TextLoader
-PyPDFLoader
-WebBaseLoader
-requests
-BeautifulSoup
-User-Agent with ordinary headers
-metadata_filtering (storing document/chunk embeddings with metadata for filtered retrieval)
-hybrid search (vector + BM25 + TF-IDF, combinations, adaptive)
-query expansion: by synonyms, context keywords, by llm (with approaches, contexts, context-aware)
-re-ranking of documents (by llms, by cross encoders such as MS-MARCO MiniLM and NLI Electra)
-RAGAS (using expert LLM to generate expert truths, evaluating RAG using another LLM)
-Neo4J
-Faker
-docker
-LLMGraphTransformer
-Neo4jGraph
-graph db with ontology
-GraphCypherQAChain
+## Modele i dostawcy LLM (Module 2 – LLMs)
 
-Chains and graphs
-AnyMessage, HumanMessage
-langgraph (StateGraph, START, END, MessagesState, add_messages, tools_condition, ToolNode)
-WikipediaLoader
-TavilySearchResults
-pydantic (BaseModel)
-graph with parallel processes, decision making, map-reduce
+AzureOpenAI / AzureChatOpenAI – obsługa modeli GPT w Azure
+Wszystkie dostępne modele AzureChatOpenAI – pełny dostęp do modeli czatowych
+100$ Azure credits – środki startowe do eksperymentów
+Multi-provider integration – jednolity interfejs dla wielu dostawców
+OpenAI vs Claude analysis – porównanie stylu i struktury odpowiedzi
+Analiza obiektów odpowiedzi – dostęp do treści, metadanych i tokenów
+ChatPromptTemplate – szablony rozmów w LangChain
+OllamaLLM – lokalne modele (np. Llama)
 
-agents & function calling
-forcing function call
-langchain tools
-tool decorator
-langchain agent, create_tool_calling_agent, executor
-create_react_agent
-langgraph.checkpoint.memory, MemorySaver
-ToolNodes in graphs
-WikipediaQueryRun
-TavilySearchResults
-WikipediaAPIWrapper
-arxiv
-langchain_community.agent_toolkits.load_tools
-langgraph_supervisor
-Langgraph CLI
-moving configuration&prompts to config files
-refactoring of system to modularize and generalize code
-Google A2A Protocol
-Standalone agents (ex. in Docker)
+## Embeddingi (Module 2 – Embeddings)
 
-MVP
-FastMCP
-servers, client
-servers in docker containers
+text-embedding-3-small – generowanie wektorów semantycznych
+Analiza wektorów – podobieństwo i struktura przestrzeni
+Metryki podobieństwa – cosinus, Euklides, iloczyn skalarny
+Operacje na wektorach – arytmetyka semantyczna
+Efekt kontekstu – wpływ otoczenia na embedding
+Wizualizacja PCA – rzutowanie embeddingów do 2D
+
+## Retrieval Augmented Generation (Module 3)
+
+RAG pipeline – load → embed → retrieve → generate
+TextLoader / DirectoryLoader – wczytywanie plików
+PyPDFLoader – przetwarzanie PDF
+WebBaseLoader – pobieranie treści z WWW
+requests – ręczne zapytania HTTP
+BeautifulSoup – parsowanie i czyszczenie HTML
+User-Agent + headers – unikanie blokad przy scrapingu
+InMemoryVectorStore – wektory w RAM
+ChromaDB / FAISS – trwałe i szybkie magazyny wektorów
+RecursiveCharacterTextSplitter – dzielenie tekstu na fragmenty
+Metadata filtering – filtrowanie po metadanych
+BM25 & TF-IDF – klasyczne wyszukiwanie leksykalne
+Hybrid search – łączenie wektorów i wyszukiwania słów
+Adaptive hybrid search – dynamiczny dobór strategii
+Query expansion – synonimy, kontekst, perspektywy
+LLM-based query expansion – generowanie zapytań przez model
+Context-aware expansion – dopasowanie do domeny
+Reranking – ponowne sortowanie wyników
+Cross-encoder reranking – MS-MARCO MiniLM, NLI Electra
+LLM-based scoring – ocena trafności przez LLM
+Score fusion / RRF – łączenie rankingów
+Diversyfikacja wyników – promowanie różnorodności
+Neo4j – grafowa baza danych
+Graph DB z ontologią – modelowanie domeny
+LLMGraphTransformer – ekstrakcja grafu z tekstu
+Neo4jGraph / GraphCypherQAChain – zapytania Cypher w RAG
+RAGAS – obiektywna ocena systemów RAG
+Ground truth generation – odpowiedzi eksperckie generowane przez LLM
+RAGAS metrics – precision, recall, faithfulness, relevancy
+Multi-RAG evaluation – porównanie strategii (Naive, Hybrid, Expansion…)
+
+## LangGraph i łańcuchy (Module 4)
+
+StateGraph / MessagesState – graf stanu rozmowy
+START / END – punkty wejścia i wyjścia
+AnyMessage / HumanMessage – typy wiadomości
+add_messages – aktualizacja stanu
+ToolNode / tools_condition – warunkowe przejścia
+ToolNodes w grafach – narzędzia jako węzły
+Parallel processes – równoległe ścieżki
+Map-reduce pattern – mapowanie i agregacja
+MemorySaver / checkpoint.memory – trwała pamięć grafu
+langgraph_supervisor – koordynacja agentów
+LangGraph CLI – uruchamianie i debugowanie
+
+## Agenci i wywołania funkcji (Module 5 – Basic Agents)
+
+OpenAI function calling – schematy funkcji
+Forcing function call – wymuszanie wywołań
+@tool decorator – definicja narzędzi
+LangChain tools – abstrakcja narzędzi
+create_tool_calling_agent + executor – agent funkcyjny
+create_react_agent – agent ReAct (myśl → działaj)
+WikipediaQueryRun / WikipediaAPIWrapper – Wikipedia
+TavilySearchResults – wyszukiwanie w sieci
+arXiv tool – artykuły naukowe
+load_tools (agent_toolkits) – zestawy narzędzi
+Memory / conversation state – zapamiętywanie kontekstu
+Multi-tool reasoning – wybór narzędzi
+
+## Złożone i wieloagentowe systemy (Module 5 – Complex Agents & Module 5 – Multi‑Agent Systems)
+
+StateGraph z warunkowym routowaniem – dynamiczne ścieżki
+Supervisor-coordinated systems – agent nadrzędny
+Sequential research assistant – pipeline agentów
+Outliner / Writer / Editor – wieloetapowe role
+Warunkowe pętle – iteracja do spełnienia kryteriów
+Google A2A Protocol – komunikacja agent–agent
+Standalone agents (Docker) – mikroserwisy agentowe
+External API integration – prawdziwe API
+LangGraph Studio – wizualne debugowanie
+Configuration files (TOML) – konfiguracja poza kodem
+Modularization & refactoring – separacja logiki
+Performance & monitoring – metryki i logowanie
+
+## MCP i serwery FastMCP (Module 6)
+
+MCP – standard komunikacji LLM ↔ narzędzia
+FastMCP framework – szybkie serwery MCP
+Servers & client – architektura klient–serwer
+Standalone MCP servers – niezależne usługi
+Docker containers – izolacja serwerów
+@mcp.tool decorator – definicja narzędzi
+httpx / mcp[cli] – komunikacja HTTP
+Math server – operacje matematyczne
+Weather server – prognoza pogody
+Wikipedia server – artykuły
+Tavily server – wyszukiwanie
+ArXiv server – publikacje naukowe
+
+## MVP i produkt
+
+MVP – minimalna wersja produktu do walidacji
+Refaktoryzacja do produkcji – stabilność i skalowalność
+Deployment w Dockerze – powtarzalność środowiska
