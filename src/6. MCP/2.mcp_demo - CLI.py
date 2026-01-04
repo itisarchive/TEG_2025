@@ -10,6 +10,7 @@ Usage: uv run "2.mcp_demo - CLI.py"
 """
 
 import asyncio
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -68,7 +69,8 @@ async def demo_weather_server():
     # Define weather server parameters
     weather_params = StdioServerParameters(
         command="uv",
-        args=["run", "--with", "mcp>=1.2.0", "--with", "httpx>=0.28.1", "--with", "python-dotenv>=1.0.0", "weather_server/weather.py"]
+        args=["run", "--with", "mcp>=1.2.0", "--with", "httpx>=0.28.1", "--with", "python-dotenv>=1.0.0",
+              "weather_server/weather.py"]
     )
 
     try:

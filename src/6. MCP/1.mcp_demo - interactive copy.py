@@ -68,7 +68,8 @@ print("=" * 45)
 # Define weather server parameters
 weather_params = StdioServerParameters(
     command="uv",
-    args=["run", "--with", "mcp>=1.2.0", "--with", "httpx>=0.28.1", "--with", "python-dotenv>=1.0.0", "weather_server/weather.py"]
+    args=["run", "--with", "mcp>=1.2.0", "--with", "httpx>=0.28.1", "--with", "python-dotenv>=1.0.0",
+          "weather_server/weather.py"]
 )
 
 # Connect, initialize, and query weather

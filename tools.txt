@@ -71,3 +71,8 @@ moving configuration&prompts to config files
 refactoring of system to modularize and generalize code
 Google A2A Protocol
 Standalone agents (ex. in Docker)
+
+MVP
+FastMCP
+servers, client
+servers in docker containers
