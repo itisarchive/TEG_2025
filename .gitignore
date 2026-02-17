@@ -1,10 +1,13 @@
 !**/[Pp]ackages/build/
+!*.svg  # comment out if you don't need vector files
 !.axoCover/settings.json
+!.vscode/*.code-snippets
 !.vscode/extensions.json
 !.vscode/launch.json
 !.vscode/settings.json
 !.vscode/tasks.json
 !?*.[Cc]ache/
+$RECYCLE.BIN/
 $tf/
 *$py.class
 **/*.DesktopClient/GeneratedArtifacts
@@ -57,6 +60,7 @@ $tf/
 *.jmconfig
 *.launch
 *.ldf
+*.lnk
 *.log
 *.manifest
 *.mdf
@@ -109,6 +113,9 @@ $tf/
 *.snupkg
 *.so
 *.spec
+*.stackdump
+*.stTheme.cache
+*.sublime-workspace
 *.suo
 *.svclog
 *.swp
@@ -116,8 +123,10 @@ $tf/
 *.tlh
 *.tli
 *.tlog
+*.tmlanguage.cache
 *.tmp
 *.tmp_proj
+*.tmPreferences.cache
 *.tss
 *.user
 *.userosscache
@@ -127,6 +136,7 @@ $tf/
 *.VC.db
 *.VC.VC.opendb
 *.VisualState.xml
+*.vsix
 *.vsp
 *.vspscc
 *.vspx
@@ -140,6 +150,11 @@ $tf/
 *~
 *~.nib
 .*crunch*.local.xml
+._*
+.apdisk
+.AppleDB
+.AppleDesktop
+.AppleDouble
 .apt_generated/
 .apt_generated_test/
 .autotools
@@ -148,16 +163,22 @@ $tf/
 .builds
 .cache
 .cache-main
+.com.apple.timemachine.donotpresent
 .coverage
 .coverage.*
 .cproject
 .cr/personal
+.directory
 .dmypy.json
+.DocumentRevisions-V100
+.DS_Store
 .eggs/
 .env
 .externalToolBuilders/
 .factorypath
 .fake/
+.fseventsd
+.fuse_hidden*
 .history/
 .hypothesis/
 .idea
@@ -188,12 +209,17 @@ $tf/
 .ipynb_checkpoints
 .loadpath
 .localhistory/
+.LSOverride
 .metadata
 .mfractor/
 .mypy_cache/
+.netrwhist
+.nfs*
 .nox/
 .ntvs_analysis.dat
 .paket/paket.exe
+.pdm-build/
+.pdm-python
 .pdm.toml
 .pybuilder/
 .pyre/
@@ -207,40 +233,46 @@ $tf/
 .scala_dependencies
 .scrapy
 .settings/
+.Spotlight-V100
 .springBeans
 .spyderproject
 .spyproject
 .target
+.TemporaryItems
 .tern-project
 .texlipse
 .tox/
+.Trash-*
+.Trashes
 .venv
+.VolumeIcon.icns
 .vs/
 .vscode/*
 .vshistory/
 .webassets-cache
 .worksheet
 /site
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]*.un~
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
-[Bb]in
 [Bb]in/
 [Bb]uild[Ll]og.*
 [Dd]ebug/
 [Dd]ebugPS/
 [Dd]ebugPublic/
+[Dd]esktop.ini
 [Ee]xpress/
-[Ii]nclude
-[Ll]ib
-[Ll]ib64
-[Ll]ocal
 [Ll]og/
 [Ll]ogs/
 [Oo]bj/
 [Rr]elease/
 [Rr]eleasePS/
 [Rr]eleases/
-[Ss]cripts
 [Tt]est[Rr]esult*/
 [Ww][Ii][Nn]32/
 __pycache__/
@@ -259,6 +291,7 @@ atlassian-ide-plugin.xml
 AutoTest.Net/
 Backup*/
 BenchmarkDotNet.Artifacts/
+bh_unicode_properties.cache
 bin/
 bld/
 build/
@@ -295,6 +328,8 @@ docs/_build/
 downloads/
 ecf/
 eggs/
+ehthumbs.db
+ehthumbs_vista.db
 env.bak/
 env/
 ENV/
@@ -304,8 +339,10 @@ FodyWeavers.xsd
 gen
 Generated\ Files/
 Generated_Code/
+GitHub.sublime-settings
 healthchecksdb
 htmlcov/
+Icon
 instance/
 ipch/
 ipython_config.py
@@ -317,33 +354,49 @@ MANIFEST
 MigrationBackup/
 mono_crash.*
 nCrunchTemp_*
+Network Trash Folder
 node_modules/
 nosetests.xml
 nunit-*.xml
 OpenCover/
 orleans.codegen.cs
+oscrypto-ca-bundle.crt
 out
 out/
+Package Control.ca-bundle
+Package Control.ca-certs/
+Package Control.ca-list
+Package Control.cache/
+Package Control.last-run
+Package Control.merged-ca-bundle
+Package Control.system-ca-bundle
+Package Control.user-ca-bundle
 Package.StoreAssociation.xml
 paket-files/
 parts/
 pip-delete-this-directory.txt
 pip-log.txt
-pip-selfcheck.json
 profile_default/
 project.fragment.lock.json
 project.lock.json
 publish/
 PublishScripts/
-pyvenv.cfg
 rcf/
 ScaffoldingReadMe.txt
 sdist/
 ServiceFabricBackup/
+Session.vim
+Sessionx.vim
+sftp-config-alt*.json
+sftp-config.json
 share/python-wheels/
 StyleCopReport.xml
+tags
 target/
+Temporary Items
 TestResult.xml
+Thumbs.db
+Thumbs.db:encryptable
 tmp/
 UpgradeLog*.htm
 UpgradeLog*.XML
