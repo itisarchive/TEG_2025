@@ -1,59 +1,91 @@
-# Large Language Models (LLMs) - Provider Integration and Analysis
+# Large Language Models (LLMs) — Provider Integration and Response Analysis
 
-This module focuses on understanding different LLM providers and analyzing their API responses. After completing the introductory concepts in Module 1, this module dives deeper into the technical aspects of working with multiple AI providers and understanding their response structures.
+This module focuses on understanding different LLM providers and analyzing their
+API responses. After completing the introductory concepts in Module 1, we dive
+deeper into the technical aspects of working with **Azure OpenAI** and
+**Anthropic Claude**, and then show how **LangChain** provides a unified
+interface across multiple providers.
 
-## 📚 Learning Modules
+## 🎯 Learning Objectives
 
-### 1. OpenAI Response Analysis (`1. OpenAI - analyze the response object.py`)
-**🔍 Deep dive into OpenAI API response structure**
-- Complete OpenAI response object exploration
-- Token usage tracking and cost calculation
-- Metadata analysis and debugging information
-- Understanding completion statistics
-- Response timing and performance metrics
+By completing this module, you will:
 
-### 2. Claude Response Analysis (`2. Claude - analyze the response object.py`)
+- Understand the full anatomy of an Azure OpenAI `ChatCompletion` response object
+- Understand the full anatomy of an Anthropic Claude `Message` response object
+- Know how to track token usage for cost management and monitoring
+- Compare structural differences between the two APIs
+- Use LangChain to switch providers without changing application logic
+- Run local models via Ollama through the same LangChain interface
+
+## 📚 Module Content
+
+### 1. Azure OpenAI Response Analysis (`1. OpenAI - analyze the response object.py`)
+
+**🔍 Deep dive into Azure OpenAI API response structure**
+
+Sends a chat completion request via the native `openai` SDK and unpacks every
+layer of the returned `ChatCompletion` object:
+
+- **Response anatomy** — id, model, choices, message, usage
+- **Field-by-field exploration** — type, ID, model, choices array, message content
+- **Detailed usage statistics** — prompt / completion / total tokens, reasoning & audio breakdowns
+
+### 2. Anthropic Claude Response Analysis (`2. Claude - analyze the response object.py`)
+
 **🔍 Anthropic Claude API response structure**
-- Claude API response object breakdown
-- Token consumption patterns and billing
-- Response formatting and content structure
-- Anthropic-specific metadata and features
-- Comparison with OpenAI response patterns
+
+Same approach as above but for the Claude Messages API:
+
+- **Response anatomy** — id, model, content blocks, usage
+- **Field-by-field exploration** — type, content array, TextBlock, text
+- **Detailed usage statistics** — input / output tokens (no built-in total)
+- **Claude vs OpenAI comparison** — method names, content paths, system message placement, usage field names
 
 ### 3. Multi-Provider Integration (`3. Different models with LangChain.py`)
+
 **🔗 Working with multiple LLM providers using LangChain**
-- Unified interface for multiple providers
-- OpenAI GPT models integration (3.5-turbo, 4, 4o)
-- Anthropic Claude models integration (3.5 Sonnet, 3.5 Haiku)
-- Local model support via Ollama integration
-- Provider switching and performance comparison
-- Cost optimization across different providers
+
+Demonstrates five ways to call an LLM, from native SDKs to a unified abstraction:
+
+- **Azure OpenAI — Native SDK** — direct `AzureOpenAI` chat completion call
+- **Anthropic Claude — Native SDK** — direct `Anthropic` messages call
+- **Azure OpenAI — via LangChain** — `AzureChatOpenAI.invoke()`
+- **Anthropic Claude — via LangChain** — `ChatAnthropic.invoke()`
+- **Ollama (local models) — via LangChain** — `OllamaLLM` with prompt chains (llama3.1, gemma3)
+
+### 4. Notebook (`notebook_2.ipynb`)
+
+The same material as the `.py` files above in an interactive Jupyter notebook
+format with additional explanatory markdown cells.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Python 3.13+
 - Completion of **Module 1 (Intro)** for foundational LLM concepts
-- API keys for the providers you want to explore
+- Azure OpenAI resource with deployed models
+- Anthropic API key
+- *(Optional)* Ollama installed locally for the local-model demo
 
-### Environment Setup
-1. **Install dependencies**:
-   ```bash
-   cd "src/2. Models/2. LLMs"
-   uv sync
-   ```
+### Setup
 
-2. **Configure environment variables** in `.env` file:
-   ```env
-   OPENAI_API_KEY=your_openai_key_here
-   ANTHROPIC_API_KEY=your_anthropic_key_here
-   ```
-
-### Running Examples
-
-#### Provider Response Analysis
 ```bash
-# Analyze OpenAI API response structure
+# 1. Navigate to the module
+cd "src/2. Models/2. LLMs"
+
+# 2. Install dependencies
+uv sync
+
+# 3. Create your .env from the template
+cp .env.example .env
+# Then fill in all four variables (see Environment Variables below)
+```
+
+### Running the Examples
+
+```bash
+# Analyze Azure OpenAI API response structure
 uv run python "1. OpenAI - analyze the response object.py"
 
 # Analyze Anthropic Claude API response structure
@@ -64,98 +96,60 @@ uv run python "3. Different models with LangChain.py"
 ```
 
 ### Recommended Learning Sequence
-1. **Start with OpenAI analysis** - Most familiar API structure
-2. **Explore Claude responses** - Compare different provider approaches
-3. **Try multi-provider integration** - See unified interface benefits
+
+1. **Start with Azure OpenAI analysis** — understand the ChatCompletion object
+2. **Explore Claude responses** — compare a different provider's response structure
+3. **Try multi-provider integration** — see how LangChain unifies access
 
 ## 🛠️ Dependencies
 
-| Package | Purpose | Version |
-|---------|---------|---------|
-| `openai` | OpenAI API integration | ≥1.0.0 |
-| `anthropic` | Claude API integration | ≥0.68.1 |
-| `langchain-openai` | LangChain OpenAI wrapper | ≥0.3.33 |
-| `langchain-anthropic` | LangChain Anthropic wrapper | ≥0.3.20 |
-| `python-dotenv` | Environment variable management | ≥1.0.0 |
-| `streamlit` | Web framework (for future extensions) | ≥1.50.0 |
+Defined in `pyproject.toml`:
 
-## 📖 Learning Path
+| Package               | Purpose                        | Min version |
+|-----------------------|--------------------------------|-------------|
+| `openai`              | Azure OpenAI SDK               | ≥ 2.21.0    |
+| `anthropic`           | Claude API SDK                 | ≥ 0.83.0    |
+| `langchain-openai`    | LangChain Azure OpenAI wrapper | ≥ 1.1.10    |
+| `langchain-anthropic` | LangChain Anthropic wrapper    | ≥ 1.3.3     |
+| `langchain-ollama`    | LangChain Ollama wrapper       | ≥ 1.0.1     |
+| `python-dotenv`       | `.env` file loading            | ≥ 1.2.1     |
 
-### Prerequisites
-- **Complete Module 1 (Intro)** first for foundational LLM concepts
-- Basic understanding of system prompts, temperature, and tokens
+## 🔐 Environment Variables
 
-### Beginner (Provider Basics)
-1. **OpenAI Response Analysis** - Start with the most common provider
-2. **Compare response structures** - Understand the data you're working with
-3. **Explore token tracking** - Learn cost implications
+All scripts rely on variables loaded from a `.env` file (see `.env.example`):
 
-### Intermediate (Multi-Provider)
-1. **Claude Response Analysis** - See different provider approaches
-2. **Compare billing models** - Understand cost differences
-3. **Multi-provider script** - Use LangChain for unified access
+| Variable                | Description                            |
+|-------------------------|----------------------------------------|
+| `AZURE_OPENAI_ENDPOINT` | Your Azure OpenAI resource URL         |
+| `AZURE_OPENAI_API_KEY`  | API key for Azure OpenAI               |
+| `OPENAI_API_VERSION`    | API version, e.g. `2025-04-01-preview` |
+| `ANTHROPIC_API_KEY`     | API key for Anthropic Claude           |
 
-### Advanced (Integration Mastery)
-1. **Build provider-agnostic applications** - Code that works with any provider
-2. **Implement cost optimization strategies** - Choose providers dynamically
-3. **Create custom response analyzers** - Build tools for debugging and monitoring
+> ⚠️ Each model name used in code (e.g. `gpt-5-nano`, `gpt-4o-mini`) must have
+> a matching **deployment** in Azure AI Foundry.
 
-## 🔍 What You'll Learn
+## 🎓 Learning Path
 
-### Technical Skills
-- **API Response Structure**: Deep understanding of how different providers format their responses
-- **Token Analysis**: Track usage, calculate costs, optimize for efficiency
-- **Provider Comparison**: Understand strengths and pricing models of different LLMs
-- **Unified Interfaces**: Use LangChain to abstract away provider differences
-- **Debugging Skills**: Analyze response metadata for troubleshooting
+1. **Read this README** — understand the module goals
+2. **Set up your environment** — `.env` and dependencies
+3. **Run script 1** — explore the Azure OpenAI response object
+4. **Run script 2** — explore the Claude response object, compare with OpenAI
+5. **Run script 3** — see native vs LangChain calls, try local models
+6. **Experiment** — swap models, compare token usage, adjust parameters
 
-### Business Understanding
-- **Cost Optimization**: Choose the right model for the right task
-- **Provider Selection**: Make informed decisions about which AI provider to use
-- **Performance Monitoring**: Track and analyze LLM performance metrics
-- **Production Readiness**: Understand what data is available for monitoring and debugging
+## 💡 Tips
 
-## 🔧 Advanced Experiments
+- Never commit `.env` to version control — it contains your API keys.
+- Start with cheaper models (`gpt-4o-mini`, `gpt-4.1-nano`) during experimentation.
+- Ollama demos require a running local model (`ollama run llama3.1`).
+- Compare response shapes between providers to understand what metadata each offers.
+- Token counts differ between providers — always verify billing documentation.
 
-### Comparing Response Quality
-Modify the scripts to ask the same question to multiple providers and compare:
-- Response quality and accuracy
-- Token usage and cost efficiency
-- Response time and latency
-- Metadata and debugging information available
+## 🚀 Next Steps
 
-### Custom Response Analyzers
-Build tools to:
-- Track token usage across multiple requests
-- Compare cost efficiency between providers
-- Monitor response quality over time
-- Debug issues with specific prompts or models
+After mastering this module, continue with:
 
-### Provider Integration Patterns
-Experiment with:
-- Fallback strategies (try GPT-4, fall back to GPT-3.5 if rate limited)
-- Cost optimization (use cheaper models for simple tasks)
-- Response validation (check quality before returning to user)
-
-## 💡 Production Insights
-
-### Key Takeaways for Real Applications
-1. **Response structure varies significantly** between providers
-2. **Token counting methods differ** - important for cost calculation
-3. **Metadata richness varies** - affects debugging capabilities
-4. **LangChain provides valuable abstraction** for multi-provider apps
-5. **Cost optimization requires understanding each provider's strengths**
-
-### Common Integration Patterns
-- **Provider routing**: Send different types of requests to optimal providers
-- **Cost monitoring**: Track spend across multiple providers in real-time
-- **Quality assurance**: Use response metadata to validate output quality
-- **Error handling**: Gracefully handle different error formats from each provider
-
-## 🔗 Related Modules
-
-- **Module 1 (Intro)**: `../../1. Intro/` - Basic LLM concepts (complete first!)
-- **Module 3 (RAG)**: `../../3. Retrieval Augmented Generation/` - Advanced AI applications
-- **Module 4 (Chains)**: `../../4. Chains/` - Workflow automation
-- **Module 5 (Agents)**: `../../5. Tools and Agents/` - Autonomous AI systems
-- **Module 6 (MCP)**: `../../6. MCP/` - Protocol-based integrations
+1. **Module 3 (RAG)** — Retrieval Augmented Generation for knowledge-based AI
+2. **Module 4 (Graphs)** — workflow automation with LangGraph
+3. **Module 5 (Tools and Agents)** — autonomous AI agents
+4. **Module 6 (MCP)** — Model Context Protocol for advanced integrations

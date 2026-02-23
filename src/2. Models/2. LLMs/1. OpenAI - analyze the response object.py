@@ -1,91 +1,154 @@
 #!/usr/bin/env python3
 """
-OpenAI Response Object Analysis Demo
+🔍 Azure OpenAI Response Object — Deep Dive
+============================================
 
-This script demonstrates how to analyze and work with the OpenAI API response object.
-It shows how to access different parts of the response including metadata, usage stats,
-and the actual content.
+Every call to the Chat Completions API returns a rich response object packed with
+metadata, usage statistics, and — of course — the generated content itself.
 
-Required environment variables:
-- OPENAI_API_KEY: Your OpenAI API key
+This script walks you through each layer of that object so you can confidently
+extract exactly the data you need for logging, monitoring, and cost tracking.
+
+🎯 What You'll Learn:
+- The full anatomy of a ChatCompletion response object
+- How to navigate choices, messages, and usage statistics
+- How to inspect detailed token-usage breakdowns (reasoning, audio, etc.)
+
+🔧 Prerequisites:
+- Azure OpenAI credentials in .env file
+- Python 3.13+ with openai and python-dotenv packages
 """
+
+import textwrap
+
 from dotenv import load_dotenv
-from openai import AzureOpenAI
-
-# Use override=True to ensure project-specific settings take precedence
-load_dotenv(override=True)
-
-# Initialize OpenAI client - this creates our connection to the LLM service
-client = AzureOpenAI()
-
-system_prompt = "You are a helpful assistant who explains concepts clearly and concisely."
-question = "Why is the sky blue?"
-
-messages = [
-    {"role": "system", "content": system_prompt},
-    {"role": "user", "content": question}
-]
-
-response = client.chat.completions.create(
-    model="gpt-5-nano",
-    messages=messages
+from openai.lib.azure import AzureOpenAI
+from openai.types.chat import ChatCompletion
+from openai.types.chat import (
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
 )
-answer = response.choices[0].message.content.strip()
-print(answer)
 
-# Analyze the response object structure
-print("=== Response Object Analysis ===")
-print()
 
-print("1. Response Object Type:")
-print(f"   {type(response)}")
-print()
+def print_section_header(title: str) -> None:
+    separator = "=" * 60
+    print(f"\n{separator}\n{title}\n{separator}")
 
-print("2. Response ID:")
-print(f"   {response.id}")
-print()
 
-print("3. Model Used:")
-print(f"   {response.model}")
-print()
+def send_chat_completion(
+        client: AzureOpenAI,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        model_name: str = "gpt-5-nano",
+) -> ChatCompletion:
+    """Sends a system+user message pair to Azure OpenAI and returns the raw ChatCompletion object."""
+    chat_messages = [
+        ChatCompletionSystemMessageParam(role="system", content=system_prompt),
+        ChatCompletionUserMessageParam(role="user", content=user_prompt),
+    ]
+    return client.chat.completions.create(
+        model=model_name,
+        messages=chat_messages,
+    )
 
-print("4. Full Response Object:")
-print(f"   {response}")
-print()
 
-print("5. Choices Array:")
-print(f"   {response.choices}")
-print()
+def demonstrate_response_object_anatomy(client: AzureOpenAI) -> None:
+    """
+    The Chat Completions API returns a ChatCompletion object that contains:
+    • id            — unique identifier of this completion request
+    • model         — the model that actually served the request
+    • choices[]     — list of generated replies (usually one)
+      └ message     — the assistant's message with role and content
+    • usage         — token counts (prompt, completion, total)
 
-print("6. First Choice Object:")
-print(f"   {response.choices[0]}")
-print()
+    Below we make a single request and then unpack every layer of the response
+    so you can see what lives inside.
+    """
+    print_section_header("RESPONSE OBJECT ANATOMY")
+    print(textwrap.dedent(demonstrate_response_object_anatomy.__doc__))
 
-print("7. Message Object:")
-print(f"   {response.choices[0].message}")
-print()
+    completion_response = send_chat_completion(
+        client,
+        system_prompt="You are a helpful assistant who explains concepts clearly and concisely.",
+        user_prompt="Why is the sky blue?",
+    )
 
-print("8. Message Content:")
-print(f"   {response.choices[0].message.content}")
-print()
+    assistant_answer = completion_response.choices[0].message.content.strip()
+    print(assistant_answer)
 
-print("9. Usage Statistics:")
-print(f"   {response.usage}")
-print()
+    print_section_header("FIELD-BY-FIELD EXPLORATION")
 
-# Display usage statistics in a more readable format
-if response.usage:
-    print("=== Detailed Usage Statistics ===")
-    print(f"Prompt tokens: {response.usage.prompt_tokens}")
-    print(f"Completion tokens: {response.usage.completion_tokens}")
-    print(f"Total tokens: {response.usage.total_tokens}")
+    response_object_type = type(completion_response)
+    print(f"1. Response Object Type:\n   {response_object_type}\n")
 
-    # Check if detailed usage information is available
-    if hasattr(response.usage, 'completion_tokens_details'):
-        details = response.usage.completion_tokens_details
-        print(f"Reasoning tokens: {details.reasoning_tokens}")
-        print(f"Audio tokens: {details.audio_tokens}")
+    response_id = completion_response.id
+    print(f"2. Response ID:\n   {response_id}\n")
 
-print("\n" + "=" * 60)
-print("Note: The response object contains rich metadata that can be used")
-print("for monitoring, logging, and understanding API usage patterns.")
+    model_used = completion_response.model
+    print(f"3. Model Used:\n   {model_used}\n")
+
+    full_response_repr = completion_response
+    print(f"4. Full Response Object:\n   {full_response_repr}\n")
+
+    choices_array = completion_response.choices
+    print(f"5. Choices Array:\n   {choices_array}\n")
+
+    first_choice = completion_response.choices[0]
+    print(f"6. First Choice Object:\n   {first_choice}\n")
+
+    message_object = first_choice.message
+    print(f"7. Message Object:\n   {message_object}\n")
+
+    message_content = message_object.content
+    print(f"8. Message Content:\n   {message_content}\n")
+
+    usage_summary = completion_response.usage
+    print(f"9. Usage Statistics:\n   {usage_summary}\n")
+
+    display_detailed_usage_statistics(completion_response)
+
+    print(
+        "\n💡 The response object contains rich metadata that can be used\n"
+        "   for monitoring, logging, and understanding API usage patterns."
+    )
+
+
+def display_detailed_usage_statistics(completion_response: ChatCompletion) -> None:
+    """
+    Token usage is critical for cost management and performance monitoring.
+
+    The usage object always includes:
+    • prompt_tokens      — tokens consumed by the input (system + user messages)
+    • completion_tokens  — tokens generated by the model
+    • total_tokens       — sum of the above
+
+    Some models also expose completion_tokens_details with granular breakdowns
+    such as reasoning_tokens and audio_tokens.
+    """
+    if not completion_response.usage:
+        return
+
+    print_section_header("DETAILED USAGE STATISTICS")
+    print(textwrap.dedent(display_detailed_usage_statistics.__doc__))
+
+    prompt_token_count = completion_response.usage.prompt_tokens
+    completion_token_count = completion_response.usage.completion_tokens
+    total_token_count = completion_response.usage.total_tokens
+
+    print(f"Prompt tokens:     {prompt_token_count}")
+    print(f"Completion tokens: {completion_token_count}")
+    print(f"Total tokens:      {total_token_count}")
+
+    if hasattr(completion_response.usage, "completion_tokens_details"):
+        token_details = completion_response.usage.completion_tokens_details
+        if token_details:
+            print(f"Reasoning tokens:  {token_details.reasoning_tokens}")
+            print(f"Audio tokens:      {token_details.audio_tokens}")
+
+
+if __name__ == "__main__":
+    load_dotenv(override=True)
+    azure_openai_client = AzureOpenAI()
+
+    demonstrate_response_object_anatomy(azure_openai_client)

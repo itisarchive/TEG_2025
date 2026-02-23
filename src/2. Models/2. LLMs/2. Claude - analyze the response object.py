@@ -1,108 +1,158 @@
 #!/usr/bin/env python3
 """
-Claude (Anthropic) Simple Question Demo
+🔍 Anthropic Claude Response Object — Deep Dive
+=================================================
 
-This script demonstrates basic usage of the Anthropic Claude API to ask questions
-and analyze the response structure. It compares the Claude API structure with OpenAI.
+Every call to the Claude Messages API returns a structured response object with
+metadata, usage statistics, and the generated content itself.
 
-Required environment variables:
-- ANTHROPIC_API_KEY: Your Anthropic API key
+This script walks you through each layer of that object so you can confidently
+extract exactly the data you need — and understand how it differs from OpenAI.
+
+🎯 What You'll Learn:
+- The full anatomy of a Claude Message response object
+- How to navigate content blocks, text, and usage statistics
+- Key structural differences between the Claude and OpenAI APIs
+
+🔧 Prerequisites:
+- ANTHROPIC_API_KEY in .env file
+- Python 3.13+ with anthropic and python-dotenv packages
 """
 
 import os
 import textwrap
 
 import anthropic
+from anthropic.types import Message, MessageParam, TextBlockParam
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv(override=True)
 
-# Initialize the Anthropic client with API key from environment
-api_key = os.getenv('ANTHROPIC_API_KEY')
+def print_section_header(title: str) -> None:
+    separator = "=" * 60
+    print(f"\n{separator}\n{title}\n{separator}")
 
-client = anthropic.Anthropic(api_key=api_key)
 
-# Setup the system prompt and question
-prompt = """
-You are a friendly assistant answering users' questions. You respond in corporate slang with many anglicisms."""
+def send_claude_message(
+        claude_client: anthropic.Anthropic,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        model_name: str = "claude-sonnet-4-20250514",
+        max_tokens: int = 1000,
+        temperature: float = 1.0,
+) -> Message:
+    """Sends a system+user message pair to Claude and returns the raw Message object."""
+    user_message = MessageParam(
+        role="user",
+        content=[TextBlockParam(type="text", text=user_prompt)],
+    )
+    return claude_client.messages.create(
+        model=model_name,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        system=system_prompt,
+        messages=[user_message],
+    )
 
-question = "Why is the sky blue?"
 
-# Make the API call to Claude
-response = client.messages.create(
-    model="claude-sonnet-4-20250514",  # Remember to update to current model
-    max_tokens=1000,
-    temperature=1,
-    system=prompt,
-    messages=[
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": question
-                }
-            ]
-        }
-    ]
-)
+def demonstrate_response_object_anatomy(claude_client: anthropic.Anthropic) -> None:
+    """
+    The Claude Messages API returns a Message object that contains:
+    • id            — unique identifier of this message request
+    • model         — the model that actually served the request
+    • content[]     — list of content blocks (usually one TextBlock)
+      └ .text       — the actual generated text
+    • usage         — token counts (input_tokens, output_tokens)
 
-# Display the response content
-print("=== Claude Response ===")
-print("Raw content object:")
-print(response.content)
-print()
+    Below we make a single request and then unpack every layer of the response
+    so you can see what lives inside.
+    """
+    print_section_header("RESPONSE OBJECT ANATOMY")
+    print(textwrap.dedent(demonstrate_response_object_anatomy.__doc__))
 
-# Extract the text content
-answer = response.content[0]
-print("First content block:")
-print(answer)
-print()
+    claude_response = send_claude_message(
+        claude_client,
+        system_prompt=(
+            "You are a friendly assistant answering users' questions. "
+            "You respond in corporate slang with many anglicisms."
+        ),
+        user_prompt="Why is the sky blue?",
+    )
 
-# Get the actual text
-answer_text = response.content[0].text
-print(textwrap.fill(answer_text, width=80))
+    assistant_answer_text = claude_response.content[0].text
+    print(textwrap.fill(assistant_answer_text, width=80))
 
-# Analyze the response object structure
-print("=== Response Object Analysis ===")
-print()
+    print_section_header("FIELD-BY-FIELD EXPLORATION")
 
-print("1. Response Object Type:")
-print(f"   {type(response)}")
-print()
+    response_object_type = type(claude_response)
+    print(f"1. Response Object Type:\n   {response_object_type}\n")
 
-print("2. Full Response Object:")
-print(f"   {response}")
-print()
+    full_response_repr = claude_response
+    print(f"2. Full Response Object:\n   {full_response_repr}\n")
 
-print("3. Model Used:")
-print(f"   {response.model}")
-print()
+    model_used = claude_response.model
+    print(f"3. Model Used:\n   {model_used}\n")
 
-print("4. Content Array:")
-print(f"   {response.content}")
-print()
+    content_array = claude_response.content
+    print(f"4. Content Array:\n   {content_array}\n")
 
-print("5. First Content Block Text:")
-print(f"   {response.content[0].text}")
-print()
+    first_content_block = claude_response.content[0]
+    print(f"5. First Content Block:\n   {first_content_block}\n")
 
-print("6. Usage Statistics:")
-print(f"   {response.usage}")
-print()
+    first_content_block_text = claude_response.content[0].text
+    print(f"6. First Content Block Text:\n   {first_content_block_text}\n")
 
-# Display usage statistics in a readable format
-if response.usage:
-    print("=== Detailed Usage Statistics ===")
-    print(f"Input tokens: {response.usage.input_tokens}")
-    print(f"Output tokens: {response.usage.output_tokens}")
-    total = response.usage.input_tokens + response.usage.output_tokens
-    print(f"Total tokens: {total}")
+    usage_summary = claude_response.usage
+    print(f"7. Usage Statistics:\n   {usage_summary}\n")
 
-print("\n" + "=" * 60)
-print("Note: Claude API structure differs from OpenAI:")
-print("- Uses 'messages.create()' instead of 'chat.completions.create()'")
-print("- Content is in 'content[0].text' instead of 'choices[0].message.content'")
-print("- System prompt is a separate parameter, not part of messages")
-print("- Usage statistics have different field names")
+    display_detailed_usage_statistics(claude_response)
+    display_api_comparison_with_openai()
+
+
+def display_detailed_usage_statistics(claude_response: Message) -> None:
+    """
+    Token usage is critical for cost management and performance monitoring.
+
+    The Claude usage object includes:
+    • input_tokens   — tokens consumed by the input (system + user messages)
+    • output_tokens  — tokens generated by the model
+
+    Note: Unlike OpenAI, Claude does not provide a 'total_tokens' field,
+    so we compute it ourselves.
+    """
+    if not claude_response.usage:
+        return
+
+    print_section_header("DETAILED USAGE STATISTICS")
+    print(textwrap.dedent(display_detailed_usage_statistics.__doc__))
+
+    input_token_count = claude_response.usage.input_tokens
+    output_token_count = claude_response.usage.output_tokens
+    total_token_count = input_token_count + output_token_count
+
+    print(f"Input tokens:  {input_token_count}")
+    print(f"Output tokens: {output_token_count}")
+    print(f"Total tokens:  {total_token_count}")
+
+
+def display_api_comparison_with_openai() -> None:
+    """
+    Claude and OpenAI APIs share similar concepts but differ in structure.
+    Understanding these differences is key when switching between providers.
+
+    Key differences:
+    • Method:       messages.create()  vs  chat.completions.create()
+    • Content path: content[0].text    vs  choices[0].message.content
+    • System msg:   separate parameter vs  part of messages array
+    • Usage fields: input_tokens / output_tokens  vs  prompt_tokens / completion_tokens
+    """
+    print_section_header("CLAUDE vs OPENAI — STRUCTURAL DIFFERENCES")
+    print(textwrap.dedent(display_api_comparison_with_openai.__doc__))
+
+
+if __name__ == "__main__":
+    load_dotenv(override=True)
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+    anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
+
+    demonstrate_response_object_anatomy(anthropic_client)
