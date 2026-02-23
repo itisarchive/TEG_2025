@@ -19,7 +19,7 @@ import os
 
 import streamlit as st
 from dotenv import load_dotenv
-from openai import AzureOpenAI
+from openai.lib.azure import AzureOpenAI
 
 load_dotenv(override=True)
 

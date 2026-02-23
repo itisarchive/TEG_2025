@@ -24,7 +24,7 @@ from dataclasses import dataclass, asdict
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import AzureOpenAI
+from openai.lib.azure import AzureOpenAI
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
