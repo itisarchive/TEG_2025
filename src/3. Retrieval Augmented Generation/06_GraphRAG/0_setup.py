@@ -1,715 +1,51 @@
 """
-GraphRAG Educational Setup System
-=================================
+🎓 GraphRAG Educational Setup System
+=====================================
 
 Interactive setup that handles fresh installations and existing databases,
 designed for educational use with clear explanations and safe operations.
 
 Usage:
-    python 0_setup.py           # Interactive mode (default)
+    python 0_setup.py            # Interactive mode (default)
+    python 0_setup.py --init     # Initialize Neo4j and directories only
     python 0_setup.py --fresh    # Force fresh start
     python 0_setup.py --continue # Continue with existing data
     python 0_setup.py --check    # Just check status
     python 0_setup.py --learning # Educational mode with explanations
 """
 
+import argparse
+import importlib.util
+import os
+import subprocess
+import sys
+import textwrap
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+
 from dotenv import load_dotenv
+from langchain_neo4j import Neo4jGraph
+from neo4j.exceptions import GqlError
 
 load_dotenv(override=True)
 
-import os
-import sys
-import argparse
-import subprocess
-import time
-from enum import Enum
-from typing import Dict, Any, Optional
-import logging
-
-# Neo4j utils
-from langchain_neo4j import Neo4jGraph
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
-
-
-def check_docker_neo4j() -> Dict[str, Any]:
-    """Check Docker availability and Neo4j container status."""
-    status = {
-        'docker_available': False,
-        'neo4j_container': None,
-        'container_status': None
-    }
-
-    try:
-        # Check if Docker is running
-        result = subprocess.run(
-            ['docker', 'ps', '-a', '--format', '{{.Names}}\t{{.ID}}\t{{.Status}}'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-
-        if result.returncode == 0:
-            status['docker_available'] = True
-
-            # Look for Neo4j container
-            for line in result.stdout.strip().split('\n'):
-                if line and 'neo4j-graphrag' in line:
-                    parts = line.split('\t')
-                    if len(parts) >= 3:
-                        status['neo4j_container'] = parts[1]  # Container ID
-                        # Check if container is running
-                        status['container_status'] = 'Up' if 'Up' in parts[2] else 'Exited'
-                    break
-
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-        pass
-
-    return status
-
-
-class Neo4jStatusChecker:
-    """Check Neo4j database connection and status."""
-
-    def __init__(self):
-        """Initialize Neo4j status checker with connection parameters."""
-        self.url = "bolt://localhost:7687"
-        self.username = "neo4j"
-        self.password = "password123"
-        self.graph = None
-
-    def check_connection(self) -> Dict[str, Any]:
-        """Check if Neo4j is accessible."""
-        result = {
-            'connected': False,
-            'uri': self.url,
-            'version': 'unknown'
-        }
-
-        try:
-            # Attempt to connect
-            self.graph = Neo4jGraph(
-                url=self.url,
-                username=self.username,
-                password=self.password
-            )
-
-            # Try to get version
-            try:
-                version_result = self.graph.query("CALL dbms.components() YIELD versions RETURN versions[0] as version")
-                if version_result and len(version_result) > 0:
-                    result['version'] = version_result[0].get('version', 'unknown')
-            except Exception:
-                result['version'] = 'connected'
-
-            result['connected'] = True
-
-        except Exception as e:
-            logger.debug(f"Connection failed: {e}")
-
-        return result
-
-    def get_database_stats(self) -> Dict[str, Any]:
-        """Get database statistics."""
-        stats = {
-            'total_nodes': 0,
-            'total_relationships': 0,
-            'node_types': {},
-            'programmers': 0,
-            'last_update': None
-        }
-
-        if not self.graph:
-            if not self.check_connection()['connected']:
-                return {'error': 'Not connected to Neo4j'}
-
-        try:
-            # Get total nodes
-            result = self.graph.query("MATCH (n) RETURN count(n) as count")
-            if result:
-                stats['total_nodes'] = result[0].get('count', 0)
-
-            # Get total relationships
-            result = self.graph.query("MATCH ()-[r]->() RETURN count(r) as count")
-            if result:
-                stats['total_relationships'] = result[0].get('count', 0)
-
-            # Get node types and counts
-            result = self.graph.query("""
-                MATCH (n)
-                UNWIND labels(n) as label
-                RETURN label, count(*) as count
-                ORDER BY count DESC
-            """)
-            if result:
-                for row in result:
-                    label = row.get('label')
-                    count = row.get('count', 0)
-                    if label:
-                        stats['node_types'][label] = count
-
-            # Get programmer count (Person nodes)
-            result = self.graph.query("MATCH (p:Person) RETURN count(p) as count")
-            if result:
-                stats['programmers'] = result[0].get('count', 0)
-
-        except Exception as e:
-            logger.debug(f"Error getting stats: {e}")
-            return {'error': str(e)}
-
-        return stats
-
-    def check_data_integrity(self) -> Dict[str, Any]:
-        """Check data integrity and quality."""
-        integrity = {
-            'issues': [],
-            'warnings': []
-        }
-
-        if not self.graph:
-            if not self.check_connection()['connected']:
-                return integrity
-
-        try:
-            # Check for orphaned nodes (nodes with no relationships)
-            result = self.graph.query("""
-                MATCH (n)
-                WHERE NOT (n)-[]-()
-                RETURN count(n) as orphaned_count
-            """)
-            if result and result[0].get('orphaned_count', 0) > 0:
-                integrity['warnings'].append(
-                    f"{result[0]['orphaned_count']} orphaned nodes (no relationships)"
-                )
-
-            # Check for Person nodes without skills
-            result = self.graph.query("""
-                MATCH (p:Person)
-                WHERE NOT (p)-[:HAS_SKILL]->()
-                RETURN count(p) as count
-            """)
-            if result and result[0].get('count', 0) > 0:
-                integrity['warnings'].append(
-                    f"{result[0]['count']} Person nodes without skills"
-                )
-
-        except Exception as e:
-            logger.debug(f"Error checking integrity: {e}")
-
-        return integrity
-
-    def clear_database(self, confirm: bool = True) -> bool:
-        """Clear all data from the database."""
-        if not self.graph:
-            if not self.check_connection()['connected']:
-                logger.error("Cannot clear database: not connected")
-                return False
-
-        try:
-            # Delete all nodes and relationships
-            self.graph.query("MATCH (n) DETACH DELETE n")
-            logger.info("Database cleared successfully")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error clearing database: {e}")
-            return False
-
-
-class SetupMode(Enum):
-    INTERACTIVE = "interactive"
-    FRESH = "fresh"
-    CONTINUE = "continue"
-    CHECK = "check"
-    LEARNING = "learning"
-    INIT = "init"
-
-
-class GraphRAGSetup:
-    """Main setup class for GraphRAG educational system."""
-
-    def __init__(self, mode: SetupMode = SetupMode.INTERACTIVE, learning_mode: bool = False):
-        """Initialize setup with specified mode."""
-        self.mode = mode
-        self.learning_mode = learning_mode
-        self.neo4j_checker = Neo4jStatusChecker()
-
-    def main(self):
-        """Main setup workflow."""
-        self.print_header()
-
-        # Step 1: Check prerequisites
-        if not self.check_prerequisites():
-            return False
-
-        # Step 2: Check current state
-        status = self.analyze_current_state()
-        if not status:
-            return False
-
-        # Step 3: Decide action based on mode
-        if self.mode == SetupMode.CHECK:
-            self.display_status_report(status)
-            return True
-
-        elif self.mode == SetupMode.INIT:
-            return self.setup_init(status)
-
-        elif self.mode == SetupMode.FRESH:
-            return self.setup_fresh(status)
-
-        elif self.mode == SetupMode.CONTINUE:
-            return self.setup_continue(status)
-
-        else:  # INTERACTIVE or LEARNING
-            return self.interactive_setup(status)
-
-    def print_header(self):
-        """Print educational header."""
-        print("=" * 70)
-        print("🎓 GraphRAG Educational Setup System")
-        print("=" * 70)
-
-        if self.learning_mode:
-            print("\n📖 Learning Mode: Explanations will be provided for each step")
-
-        print(f"\n🔧 Mode: {self.mode.value.title()}")
-        print("-" * 40)
-
-    def check_prerequisites(self) -> bool:
-        """Check all prerequisites for the system."""
-        print("\n🔍 Checking Prerequisites...")
-
-        all_good = True
-
-        # Check Python environment
-        if self.learning_mode:
-            print("\n📚 What we're checking:")
-            print("  - Python packages (OpenAI, Neo4j, etc.)")
-            print("  - Docker availability")
-            print("  - Neo4j database connection")
-            print("  - OpenAI API key")
-
-        # Check required packages
-        try:
-            import openai
-            import neo4j
-            import langchain_openai
-            import langchain_neo4j
-            print("✓ Required Python packages installed")
-        except ImportError as e:
-            print(f"✗ Missing Python package: {e}")
-            print("  Run: uv sync")
-            all_good = False
-
-        # Check OpenAI API key
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("✗ OPENAI_API_KEY not found")
-            print("  Add your API key to .env file")
-            all_good = False
-        else:
-            print("✓ OpenAI API key found")
-
-        # Check Docker and Neo4j
-        docker_status = check_docker_neo4j()
-        if not docker_status['docker_available']:
-            print("✗ Docker not available")
-            print("  Install Docker Desktop and start it")
-            all_good = False
-        else:
-            print("✓ Docker available")
-
-        if not all_good:
-            print("\n❌ Prerequisites not met. Please fix the issues above.")
-            return False
-
-        return True
-
-    def analyze_current_state(self) -> Optional[Dict[str, Any]]:
-        """Analyze current database state."""
-        print("\n🔍 Analyzing Current State...")
-
-        if self.learning_mode:
-            print("\n📚 What's happening:")
-            print("  - Checking if Neo4j is running")
-            print("  - Looking for existing data")
-            print("  - Assessing data quality")
-
-        # Check Neo4j connection
-        connection_status = self.neo4j_checker.check_connection()
-
-        if not connection_status['connected']:
-            print("⚠️  Neo4j not running")
-            docker_status = check_docker_neo4j()
-
-            if docker_status['neo4j_container']:
-                if docker_status['container_status'] != 'Up':
-                    print("  Starting existing Neo4j container...")
-                    self.start_neo4j_container()
-                    time.sleep(5)
-                    connection_status = self.neo4j_checker.check_connection()
-            else:
-                print("  No Neo4j container found")
-                if not self.setup_neo4j_docker():
-                    return None
-                connection_status = self.neo4j_checker.check_connection()
-
-        if not connection_status['connected']:
-            print("❌ Could not establish Neo4j connection")
-            self.show_docker_troubleshooting()
-            return None
-
-        print(f"✓ Connected to Neo4j {connection_status.get('version', 'unknown')}")
-
-        # Get database statistics
-        db_stats = self.neo4j_checker.get_database_stats()
-        if 'error' in db_stats:
-            print(f"⚠️  Could not get database stats: {db_stats['error']}")
-            db_stats = {'total_nodes': 0, 'total_relationships': 0}
-
-        # Check data integrity
-        integrity = self.neo4j_checker.check_data_integrity()
-
-        status = {
-            'connection': connection_status,
-            'stats': db_stats,
-            'integrity': integrity,
-            'has_data': db_stats.get('total_nodes', 0) > 0,
-            'has_programmers': db_stats.get('programmers', 0) > 0
-        }
-
-        return status
-
-    def display_status_report(self, status: Dict[str, Any]):
-        """Display comprehensive status report."""
-        print("\n📊 Database Status Report")
-        print("=" * 40)
-
-        stats = status['stats']
-
-        if status['has_data']:
-            print("✓ Knowledge graph exists")
-            print(f"  📈 Total nodes: {stats.get('total_nodes', 0):,}")
-            print(f"  🔗 Total relationships: {stats.get('total_relationships', 0):,}")
-            print()
-            print("📋 Entity Counts:")
-            for entity, count in stats.get('node_types', {}).items():
-                if entity and count > 0:
-                    print(f"  • {entity}: {count:,}")
-
-            if stats.get('last_update'):
-                print(f"\n🕒 Last updated: {stats['last_update']}")
-
-            # Show integrity issues
-            integrity = status.get('integrity', {})
-            if integrity.get('issues'):
-                print("\n⚠️  Data Issues:")
-                for issue in integrity['issues']:
-                    print(f"  • {issue}")
-
-            if integrity.get('warnings'):
-                print("\n💡 Suggestions:")
-                for warning in integrity['warnings']:
-                    print(f"  • {warning}")
-        else:
-            print("✗ No data found (empty database)")
-
-        print("\n🔗 Connection Info:")
-        print(f"  URI: {status['connection']['uri']}")
-        print(f"  Version: {status['connection'].get('version', 'unknown')}")
-
-    def interactive_setup(self, status: Dict[str, Any]) -> bool:
-        """Interactive setup menu."""
-        print("\n🎯 What would you like to do?")
-        print("-" * 40)
-
-        if status['has_data']:
-            options = [
-                ("1", "Continue with existing data", "continue"),
-                ("2", "View current data status", "status"),
-                ("3", "Add more data to existing graph", "extend"),
-                ("4", "Rebuild from scratch", "fresh"),
-                ("5", "Run test queries", "test"),
-                ("6", "Backup current data", "backup"),
-                ("0", "Exit", "exit")
-            ]
-        else:
-            options = [
-                ("1", "Initialize new knowledge graph", "fresh"),
-                ("2", "Load sample data", "sample"),
-                ("3", "View setup instructions", "help"),
-                ("0", "Exit", "exit")
-            ]
-
-        for num, desc, _ in options:
-            print(f"  {num}. {desc}")
-
-        while True:
-            choice = input("\nEnter your choice (0-6): ").strip()
-
-            action = next((action for num, _, action in options if num == choice), None)
-            if action:
-                return self.execute_action(action, status)
-            else:
-                print("Invalid choice. Please try again.")
-
-    def execute_action(self, action: str, status: Dict[str, Any]) -> bool:
-        """Execute the chosen action."""
-        if action == "exit":
-            print("👋 Goodbye!")
-            return True
-
-        elif action == "continue":
-            print("\n✓ Using existing knowledge graph")
-            self.show_next_steps(status)
-            return True
-
-        elif action == "status":
-            self.display_status_report(status)
-            return True
-
-        elif action == "fresh":
-            return self.setup_fresh(status)
-
-        elif action == "extend":
-            return self.extend_existing_data()
-
-        elif action == "test":
-            return self.run_test_queries()
-
-        elif action == "backup":
-            return self.backup_data()
-
-        elif action == "sample":
-            return self.load_sample_data()
-
-        elif action == "help":
-            self.show_help()
-            return True
-
-        else:
-            print(f"Action '{action}' not implemented yet")
-            return True
-
-    def setup_fresh(self, status: Dict[str, Any]) -> bool:
-        """Set up fresh knowledge graph."""
-        if status['has_data']:
-            print("\n⚠️  Warning: This will delete all existing data!")
-            if not self.confirm_action("Continue with fresh setup?"):
-                return True
-
-        print("\n🚀 Setting up fresh GraphRAG system...")
-
-        if self.learning_mode:
-            print("\n📚 What's happening:")
-            print("  1. Clearing database completely")
-            print("  2. Generating sample programmer data")
-            print("  3. Creating knowledge graph from data")
-            print("  4. Verifying the setup")
-
-        # Step 1: Clear database
-        print("\n1️⃣ Clearing database...")
-        if not self.neo4j_checker.clear_database(confirm=True):
-            print("❌ Failed to clear database")
-            return False
-        print("✓ Database cleared")
-
-        # Step 2: Create directories
-        print("\n2️⃣ Creating project structure...")
-        self.create_project_structure()
-
-        # Step 3: Generate data
-        print("\n3️⃣ Generating sample data...")
-        if not self.run_script("1_generate_data.py"):
-            return False
-
-        # Step 4: Build knowledge graph
-        print("\n4️⃣ Building knowledge graph...")
-        if not self.run_script("2_data_to_knowledge_graph.py"):
-            return False
-
-        # Step 5: Verify
-        print("\n5️⃣ Verifying setup...")
-        final_status = self.analyze_current_state()
-        if final_status and final_status['has_data']:
-            print("✅ Setup completed successfully!")
-            self.display_status_report(final_status)
-            self.show_next_steps(final_status)
-            return True
-        else:
-            print("❌ Setup verification failed")
-            return False
-
-    def setup_continue(self, status: Dict[str, Any]) -> bool:
-        """Continue with existing data."""
-        if not status['has_data']:
-            print("No existing data found. Initializing fresh setup...")
-            return self.setup_fresh(status)
-        else:
-            print("✓ Using existing knowledge graph")
-            self.show_next_steps(status)
-            return True
-
-    def setup_init(self, status: Dict[str, Any]) -> bool:
-        """Initialize Neo4j and project structure only."""
-        print("\n🔧 Initializing environment...")
-
-        if self.learning_mode:
-            print("\n📚 What's happening:")
-            print("  1. Starting Neo4j server if not running")
-            print("  2. Creating project directory structure")
-            print("  3. Database will remain empty for manual data population")
-
-        # Check if Neo4j is running, start if not
-        if not status['connection']['connected']:
-            print("\n🚀 Starting Neo4j server...")
-            docker_status = check_docker_neo4j()
-
-            if docker_status['neo4j_container'] and docker_status['container_status'] != 'Up':
-                # Start existing container
-                self.start_neo4j_container()
-                print("⏳ Waiting for Neo4j to be ready...")
-                time.sleep(5)
-            elif not docker_status['neo4j_container']:
-                # Set up new container
-                if not self.setup_neo4j_docker():
-                    print("❌ Failed to start Neo4j")
-                    return False
-
-            # Verify connection
-            connection_status = self.neo4j_checker.check_connection()
-            if not connection_status['connected']:
-                print("❌ Could not establish Neo4j connection")
-                self.show_docker_troubleshooting()
-                return False
-
-        # Create project directories
-        print("\n📁 Creating project structure...")
-        self.create_project_structure()
-
-        # Print Neo4j server addresses
-        print("\n🌐 Neo4j Server Active:")
-        print("  📊 Neo4j Browser: http://localhost:7474")
-        print("  🔌 Bolt Protocol:  bolt://localhost:7687")
-        print("  👤 Username: neo4j")
-        print("  🔑 Password: password123")
-
-        # Show current database status
-        print("\n📊 Current Database Status:")
-        if status['has_data']:
-            print(f"  ⚠️  Database contains {status['stats'].get('total_nodes', 0)} nodes")
-            print("  💡 Use --fresh to clear and rebuild, or --continue to use existing data")
-        else:
-            print("  ✓ Database is empty and ready")
-
-        # Show next steps
-        print("\n🎯 Next Steps:")
-        print("  1. Generate sample CVs:")
-        print("     uv run 1_generate_data.py")
-        print("  2. Build knowledge graph:")
-        print("     uv run 2_data_to_knowledge_graph.py")
-        print("  3. Query the graph:")
-        print("     uv run 3_query_knowledge_graph.py")
-        print("\n✅ Initialization complete!")
-
-        return True
-
-    def run_script(self, script_name: str) -> bool:
-        """Run a Python script and report results."""
-        try:
-            if self.learning_mode:
-                print(f"  📝 Running {script_name}...")
-
-            result = subprocess.run([
-                sys.executable, script_name
-            ], capture_output=True, text=True, timeout=300)
-
-            if result.returncode == 0:
-                print(f"✓ {script_name} completed successfully")
-                return True
-            else:
-                print(f"❌ {script_name} failed:")
-                print(f"Error: {result.stderr}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            print(f"❌ {script_name} timed out")
-            return False
-        except Exception as e:
-            print(f"❌ Error running {script_name}: {e}")
-            return False
-
-    def create_project_structure(self):
-        """Create required directories."""
-        directories = [
-            "data/programmers",
-            "data/projects",
-            "data/RFP",
-            "results",
-            "utils"
-        ]
-
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
-
-        print("✓ Project structure created")
-
-    def setup_neo4j_docker(self) -> bool:
-        """Set up Neo4j using Docker."""
-        print("\n🐳 Setting up Neo4j with Docker...")
-
-        # Check if docker-compose.yml exists
-        if not os.path.exists("docker-compose.yml"):
-            print("Creating docker-compose.yml...")
-            self.create_docker_compose()
-
-        try:
-            result = subprocess.run([
-                "docker-compose", "up", "-d"
-            ], capture_output=True, text=True)
-
-            if result.returncode == 0:
-                print("✓ Neo4j started with Docker Compose")
-                print("⏳ Waiting for Neo4j to be ready...")
-                time.sleep(15)
-                return True
-            else:
-                print(f"❌ Failed to start Neo4j: {result.stderr}")
-                return False
-
-        except Exception as e:
-            print(f"❌ Error starting Neo4j: {e}")
-            return False
-
-    def start_neo4j_container(self):
-        """Start existing Neo4j container."""
-        try:
-            docker_status = check_docker_neo4j()
-            if docker_status['neo4j_container']:
-                result = subprocess.run([
-                    "docker", "start", docker_status['neo4j_container']
-                ], capture_output=True, text=True)
-
-                if result.returncode == 0:
-                    print("✓ Neo4j container started")
-                else:
-                    print(f"⚠️  Could not start container: {result.stderr}")
-        except Exception as e:
-            print(f"⚠️  Error starting container: {e}")
-
-    def create_docker_compose(self):
-        """Create docker-compose.yml for Neo4j."""
-        compose_content = '''version: '3.8'
+NEO4J_BOLT_URL = "bolt://localhost:7687"
+NEO4J_BROWSER_URL = "http://localhost:7474"
+NEO4J_USERNAME = "neo4j"
+NEO4J_PASSWORD = "password123"
+NEO4J_CONTAINER_NAME = "neo4j-graphrag"
+
+DOCKER_COMPOSE_TEMPLATE = """\
+version: '3.8'
 services:
   neo4j:
     image: neo4j:latest
     container_name: neo4j-graphrag
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "7474:7474"
+      - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/password123
       - NEO4J_PLUGINS=["apoc"]
@@ -725,102 +61,816 @@ volumes:
   neo4j-logs:
   neo4j-import:
   neo4j-plugins:
-'''
+"""
 
-        with open("docker-compose.yml", "w") as f:
-            f.write(compose_content)
-        print("✓ Created docker-compose.yml")
+PROJECT_DIRECTORIES = [
+    "data/programmers",
+    "data/projects",
+    "data/RFP",
+    "results",
+    "utils",
+]
 
-    def show_next_steps(self, status: Dict[str, Any]):
-        """Show appropriate next steps."""
-        print("\n🎯 Next Steps:")
-        print("-" * 30)
 
-        if status['has_programmers']:
-            print("• Try some queries:")
-            print("  python 3_query_knowledge_graph.py")
-            print("• Test GraphRAG vs Naive RAG:")
-            print("  python 5_compare_systems.py")
-        else:
-            print("• Generate some data first:")
-            print("  python 1_generate_data.py")
+def print_section_header(title: str) -> None:
+    separator = "=" * 70
+    print(f"\n{separator}\n{title}\n{separator}")
 
-        print("• Explore in Neo4j Browser:")
-        print("  http://localhost:7474")
-        print("  Username: neo4j, Password: password123")
 
-    def show_help(self):
-        """Show detailed help information."""
-        print("\n📚 GraphRAG Setup Help")
-        print("=" * 30)
-        print("""
-This system demonstrates GraphRAG (Graph Retrieval Augmented Generation)
-for a programmer staffing use case.
+@dataclass(frozen=True)
+class DockerNeo4jStatus:
+    docker_available: bool = False
+    neo4j_container_id: str | None = None
+    container_running: bool = False
 
-Components:
-• Neo4j: Graph database for storing relationships
-• OpenAI: LLM for text processing and queries
-• LangChain: Framework connecting LLMs to data
 
-Workflow:
-1. Generate synthetic programmer CVs and project data
-2. Extract knowledge graph from unstructured PDFs
-3. Query the graph using natural language
-4. Compare with traditional RAG approaches
+@dataclass(frozen=True)
+class Neo4jConnectionResult:
+    connected: bool = False
+    uri: str = NEO4J_BOLT_URL
+    version: str = "unknown"
 
-Files:
-• 1_generate_data.py: Create sample CVs and projects
-• 2_data_to_knowledge_graph.py: Build graph from PDFs
-• 3_query_knowledge_graph.py: Query the graph
-• 4_graph_rag_system.py: Full GraphRAG implementation
-• 5_compare_systems.py: Compare different approaches
-        """)
 
-    def show_docker_troubleshooting(self):
-        """Show Docker troubleshooting tips."""
-        print("\n🔧 Docker Troubleshooting:")
-        print("1. Make sure Docker Desktop is running")
-        print("2. Try: docker-compose up -d")
-        print("3. Check logs: docker-compose logs neo4j")
-        print("4. Reset: docker-compose down && docker-compose up -d")
+@dataclass(frozen=True)
+class DatabaseStats:
+    total_nodes: int = 0
+    total_relationships: int = 0
+    node_types: dict[str, int] = field(default_factory=dict)
+    programmer_count: int = 0
+    error_message: str | None = None
 
-    def confirm_action(self, message: str) -> bool:
-        """Get user confirmation."""
-        while True:
-            response = input(f"{message} (y/N): ").strip().lower()
-            if response in ['y', 'yes']:
+
+@dataclass(frozen=True)
+class DataIntegrityReport:
+    issues: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SystemState:
+    connection: Neo4jConnectionResult
+    stats: DatabaseStats
+    integrity: DataIntegrityReport
+    has_data: bool
+    has_programmers: bool
+
+
+class SetupMode(Enum):
+    INTERACTIVE = "interactive"
+    FRESH = "fresh"
+    CONTINUE = "continue"
+    CHECK = "check"
+    LEARNING = "learning"
+    INIT = "init"
+
+
+@dataclass(frozen=True)
+class ParsedSetupConfig:
+    mode: SetupMode
+    learning_mode: bool
+
+
+def detect_docker_neo4j_status() -> DockerNeo4jStatus:
+    """Detect whether Docker is available and whether a Neo4j container exists."""
+    try:
+        docker_ps_result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.ID}}\t{{.Status}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        if docker_ps_result.returncode != 0:
+            return DockerNeo4jStatus()
+
+        for line in docker_ps_result.stdout.strip().split("\n"):
+            if line and NEO4J_CONTAINER_NAME in line:
+                parts = line.split("\t")
+                if len(parts) >= 3:
+                    return DockerNeo4jStatus(
+                        docker_available=True,
+                        neo4j_container_id=parts[1],
+                        container_running="Up" in parts[2],
+                    )
+
+        return DockerNeo4jStatus(docker_available=True)
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return DockerNeo4jStatus()
+
+
+class Neo4jStatusChecker:
+    """Manages the connection to a Neo4j instance and inspects its state."""
+
+    def __init__(self) -> None:
+        self._graph: Neo4jGraph | None = None
+
+    def check_connection(self) -> Neo4jConnectionResult:
+        """Attempt to connect to the Neo4j database and retrieve its version."""
+        try:
+            self._graph = Neo4jGraph(
+                url=NEO4J_BOLT_URL,
+                username=NEO4J_USERNAME,
+                password=NEO4J_PASSWORD,
+            )
+
+            detected_version = "connected"
+            try:
+                version_rows = self._graph.query(
+                    "CALL dbms.components() YIELD versions RETURN versions[0] as version"
+                )
+                if version_rows:
+                    detected_version = version_rows[0].get("version", "unknown")
+            except GqlError:
+                pass
+
+            return Neo4jConnectionResult(connected=True, version=detected_version)
+
+        except (GqlError, ConnectionError, OSError):
+            return Neo4jConnectionResult()
+
+    def query_database_stats(self) -> DatabaseStats:
+        """Gather node, relationship, and label counts from the database."""
+        if not self._graph and not self.check_connection().connected:
+            return DatabaseStats(error_message="Not connected to Neo4j")
+
+        try:
+            node_count_rows = self._graph.query("MATCH (n) RETURN count(n) as count")
+            total_nodes = node_count_rows[0].get("count", 0) if node_count_rows else 0
+
+            relationship_count_rows = self._graph.query("MATCH ()-[r]->() RETURN count(r) as count")
+            total_relationships = relationship_count_rows[0].get("count", 0) if relationship_count_rows else 0
+
+            label_count_rows = self._graph.query("""
+                MATCH (n)
+                UNWIND labels(n) as label
+                RETURN label, count(*) as count
+                ORDER BY count DESC
+            """)
+            node_types: dict[str, int] = {}
+            if label_count_rows:
+                for row in label_count_rows:
+                    label_name = row.get("label")
+                    label_count = row.get("count", 0)
+                    if label_name:
+                        node_types[label_name] = label_count
+
+            programmer_count_rows = self._graph.query("MATCH (p:Person) RETURN count(p) as count")
+            programmer_count = programmer_count_rows[0].get("count", 0) if programmer_count_rows else 0
+
+            return DatabaseStats(
+                total_nodes=total_nodes,
+                total_relationships=total_relationships,
+                node_types=node_types,
+                programmer_count=programmer_count,
+            )
+
+        except GqlError as exc:
+            return DatabaseStats(error_message=str(exc))
+
+    def check_data_integrity(self) -> DataIntegrityReport:
+        """Detect orphaned nodes and persons without skills."""
+        if not self._graph and not self.check_connection().connected:
+            return DataIntegrityReport()
+
+        collected_warnings: list[str] = []
+
+        try:
+            orphan_rows = self._graph.query("""
+                MATCH (n)
+                WHERE NOT (n)-[]-()
+                RETURN count(n) as orphaned_count
+            """)
+            orphaned_count = orphan_rows[0].get("orphaned_count", 0) if orphan_rows else 0
+            if orphaned_count > 0:
+                collected_warnings.append(f"{orphaned_count} orphaned nodes (no relationships)")
+
+            skillless_rows = self._graph.query("""
+                MATCH (p:Person)
+                WHERE NOT (p)-[:HAS_SKILL]->()
+                RETURN count(p) as count
+            """)
+            skillless_count = skillless_rows[0].get("count", 0) if skillless_rows else 0
+            if skillless_count > 0:
+                collected_warnings.append(f"{skillless_count} Person nodes without skills")
+
+        except GqlError:
+            pass
+
+        return DataIntegrityReport(warnings=collected_warnings)
+
+    def clear_all_data(self) -> bool:
+        """Delete every node and relationship from the database."""
+        if not self._graph and not self.check_connection().connected:
+            print("❌ Cannot clear database: not connected")
+            return False
+
+        try:
+            self._graph.query("MATCH (n) DETACH DELETE n")
+            print("Database cleared successfully")
+            return True
+        except GqlError as exc:
+            print(f"❌ Error clearing database: {exc}")
+            return False
+
+
+class GraphRAGSetup:
+    """
+    Main orchestrator for the GraphRAG educational setup.
+
+    Handles environment initialization, Neo4j lifecycle management,
+    data population, and interactive menu-driven workflows.
+    """
+
+    def __init__(self, *, mode: SetupMode = SetupMode.INTERACTIVE, learning_mode: bool = False) -> None:
+        self.mode = mode
+        self.learning_mode = learning_mode
+        self.neo4j_checker = Neo4jStatusChecker()
+
+    def run(self) -> bool:
+        """Execute the full setup workflow according to the selected mode."""
+        self._print_header()
+
+        if not self._verify_prerequisites():
+            return False
+
+        current_state = self._analyze_current_state()
+        if not current_state:
+            return False
+
+        match self.mode:
+            case SetupMode.CHECK:
+                self._display_status_report(current_state)
                 return True
-            elif response in ['n', 'no', '']:
-                return False
+            case SetupMode.INIT:
+                return self._execute_init(current_state)
+            case SetupMode.FRESH:
+                return self._execute_fresh_setup(current_state)
+            case SetupMode.CONTINUE:
+                return self._execute_continue(current_state)
+            case _:
+                return self._run_interactive_menu(current_state)
+
+    def _print_header(self) -> None:
+        print_section_header("🎓 GraphRAG Educational Setup System")
+
+        learning_line = "\n📖 Learning Mode: Explanations will be provided for each step" if self.learning_mode else ""
+        print(textwrap.dedent(f"""\
+            {learning_line}
+            🔧 Mode: {self.mode.value.title()}
+            {'-' * 40}"""))
+
+    def _verify_prerequisites(self) -> bool:
+        """
+        Verify that all required packages, API keys, and infrastructure
+        (Docker) are available before proceeding with setup.
+        """
+        print("\n🔍 Checking Prerequisites...")
+
+        all_prerequisites_met = True
+
+        if self.learning_mode:
+            print(textwrap.dedent("""\
+
+                📚 What we're checking:
+                  - Python packages (Azure OpenAI, Neo4j, etc.)
+                  - Docker availability
+                  - Neo4j database connection
+                  - Azure OpenAI API key
+            """))
+
+        required_packages = ["openai", "neo4j", "langchain_openai", "langchain_neo4j"]
+        missing_packages = [
+            pkg for pkg in required_packages
+            if importlib.util.find_spec(pkg) is None
+        ]
+
+        if missing_packages:
+            print(textwrap.dedent(f"""\
+                ✗ Missing Python packages: {', '.join(missing_packages)}
+                  Run: uv sync"""))
+            all_prerequisites_met = False
+        else:
+            print("✓ Required Python packages installed")
+
+        azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        if not azure_openai_api_key:
+            print(textwrap.dedent("""\
+                ✗ AZURE_OPENAI_API_KEY not found
+                  Add your API key to .env file"""))
+            all_prerequisites_met = False
+        else:
+            print("✓ Azure OpenAI API key found")
+
+        docker_neo4j_status = detect_docker_neo4j_status()
+        if not docker_neo4j_status.docker_available:
+            print(textwrap.dedent("""\
+                ✗ Docker not available
+                  Install Docker Desktop and start it"""))
+            all_prerequisites_met = False
+        else:
+            print("✓ Docker available")
+
+        if not all_prerequisites_met:
+            print("\n❌ Prerequisites not met. Please fix the issues above.")
+
+        return all_prerequisites_met
+
+    def _analyze_current_state(self) -> SystemState | None:
+        """
+        Connect to Neo4j (starting a container if necessary),
+        then collect database statistics and integrity information.
+        """
+        print("\n🔍 Analyzing Current State...")
+
+        if self.learning_mode:
+            print(textwrap.dedent("""\
+
+                📚 What's happening:
+                  - Checking if Neo4j is running
+                  - Looking for existing data
+                  - Assessing data quality
+            """))
+
+        connection = self.neo4j_checker.check_connection()
+
+        if not connection.connected:
+            print("⚠️  Neo4j not running")
+            current_docker_status = detect_docker_neo4j_status()
+
+            if current_docker_status.neo4j_container_id:
+                if not current_docker_status.container_running:
+                    print("  Starting existing Neo4j container...")
+                    self._start_existing_neo4j_container()
+                    time.sleep(5)
+                    connection = self.neo4j_checker.check_connection()
             else:
-                print("Please enter 'y' or 'n'")
+                print("  No Neo4j container found")
+                if not self._provision_neo4j_via_docker():
+                    return None
+                connection = self.neo4j_checker.check_connection()
 
-    def extend_existing_data(self) -> bool:
-        """Add more data to existing graph."""
-        print("\n📈 Extending existing knowledge graph...")
-        print("This feature is coming soon!")
+        if not connection.connected:
+            print("❌ Could not establish Neo4j connection")
+            self._print_docker_troubleshooting()
+            return None
+
+        print(f"✓ Connected to Neo4j {connection.version}")
+
+        db_stats = self.neo4j_checker.query_database_stats()
+        if db_stats.error_message:
+            print(f"⚠️  Could not get database stats: {db_stats.error_message}")
+            db_stats = DatabaseStats()
+
+        integrity_report = self.neo4j_checker.check_data_integrity()
+
+        return SystemState(
+            connection=connection,
+            stats=db_stats,
+            integrity=integrity_report,
+            has_data=db_stats.total_nodes > 0,
+            has_programmers=db_stats.programmer_count > 0,
+        )
+
+    @staticmethod
+    def _display_status_report(state: SystemState) -> None:
+        """Print a comprehensive overview of the current knowledge graph."""
+        print(textwrap.dedent(f"""\
+
+            📊 Database Status Report
+            {'=' * 40}"""))
+
+        if state.has_data:
+            entity_lines = "\n".join(
+                f"  • {entity_label}: {entity_count:,}"
+                for entity_label, entity_count in state.stats.node_types.items()
+                if entity_label and entity_count > 0
+            )
+            print(textwrap.dedent(f"""\
+                ✓ Knowledge graph exists
+                  📈 Total nodes: {state.stats.total_nodes:,}
+                  🔗 Total relationships: {state.stats.total_relationships:,}
+
+                📋 Entity Counts:
+                {entity_lines}"""))
+
+            if state.integrity.issues:
+                issue_lines = "\n".join(f"  • {desc}" for desc in state.integrity.issues)
+                print(textwrap.dedent(f"""\
+
+                    ⚠️  Data Issues:
+                    {issue_lines}"""))
+
+            if state.integrity.warnings:
+                warning_lines = "\n".join(f"  • {desc}" for desc in state.integrity.warnings)
+                print(textwrap.dedent(f"""\
+
+                    💡 Suggestions:
+                    {warning_lines}"""))
+        else:
+            print("✗ No data found (empty database)")
+
+        print(textwrap.dedent(f"""\
+
+            🔗 Connection Info:
+              URI: {state.connection.uri}
+              Version: {state.connection.version}"""))
+
+    def _run_interactive_menu(self, state: SystemState) -> bool:
+        """Present an interactive menu and execute the chosen action."""
+        print(textwrap.dedent(f"""\
+
+            🎯 What would you like to do?
+            {'-' * 40}"""))
+
+        if state.has_data:
+            menu_options = [
+                ("1", "Continue with existing data", "continue"),
+                ("2", "View current data status", "status"),
+                ("3", "Add more data to existing graph", "extend"),
+                ("4", "Rebuild from scratch", "fresh"),
+                ("5", "Run test queries", "test"),
+                ("6", "Backup current data", "backup"),
+                ("0", "Exit", "exit"),
+            ]
+        else:
+            menu_options = [
+                ("1", "Initialize new knowledge graph", "fresh"),
+                ("2", "Load sample data", "sample"),
+                ("3", "View setup instructions", "help"),
+                ("0", "Exit", "exit"),
+            ]
+
+        for option_key, option_description, _ in menu_options:
+            print(f"  {option_key}. {option_description}")
+
+        while True:
+            user_choice = input("\nEnter your choice (0-6): ").strip()
+
+            matched_action = next(
+                (action for key, _, action in menu_options if key == user_choice),
+                None,
+            )
+            if matched_action:
+                return self._dispatch_menu_action(action_name=matched_action, state=state)
+            print("Invalid choice. Please try again.")
+
+    def _dispatch_menu_action(self, *, action_name: str, state: SystemState) -> bool:
+        """Route a menu selection to the appropriate handler."""
+        match action_name:
+            case "exit":
+                print("👋 Goodbye!")
+                return True
+            case "continue":
+                print("\n✓ Using existing knowledge graph")
+                self._print_next_steps(state)
+                return True
+            case "status":
+                self._display_status_report(state)
+                return True
+            case "fresh":
+                return self._execute_fresh_setup(state)
+            case "extend":
+                return self._extend_existing_data()
+            case "test":
+                return self._run_test_queries()
+            case "backup":
+                return self._backup_data()
+            case "sample":
+                return self._load_sample_data()
+            case "help":
+                self._print_help()
+                return True
+            case _:
+                print(f"Action '{action_name}' not implemented yet")
+                return True
+
+    def _execute_fresh_setup(self, state: SystemState) -> bool:
+        """
+        Clear the database, generate sample data, build the knowledge graph,
+        and verify the result. The full pipeline for a clean start.
+        """
+        if state.has_data:
+            print("\n⚠️  Warning: This will delete all existing data!")
+            if not self._ask_for_confirmation("Continue with fresh setup?"):
+                return True
+
+        print("\n🚀 Setting up fresh GraphRAG system...")
+
+        if self.learning_mode:
+            print(textwrap.dedent("""\
+
+                📚 What's happening:
+                  1. Clearing database completely
+                  2. Generating sample programmer data
+                  3. Creating knowledge graph from data
+                  4. Verifying the setup
+            """))
+
+        print("\n1️⃣ Clearing database...")
+        if not self.neo4j_checker.clear_all_data():
+            print("❌ Failed to clear database")
+            return False
+        print("✓ Database cleared")
+
+        print("\n2️⃣ Creating project structure...")
+        self._create_project_directories()
+
+        print("\n3️⃣ Generating sample data...")
+        if not self._run_child_script("1_generate_data.py"):
+            return False
+
+        print("\n4️⃣ Building knowledge graph...")
+        if not self._run_child_script("2_data_to_knowledge_graph.py"):
+            return False
+
+        print("\n5️⃣ Verifying setup...")
+        verified_state = self._analyze_current_state()
+        if verified_state and verified_state.has_data:
+            print("✅ Setup completed successfully!")
+            self._display_status_report(verified_state)
+            self._print_next_steps(verified_state)
+            return True
+
+        print("❌ Setup verification failed")
+        return False
+
+    def _execute_continue(self, state: SystemState) -> bool:
+        """Use the existing knowledge graph, or fall back to a fresh setup if empty."""
+        if not state.has_data:
+            print("No existing data found. Initializing fresh setup...")
+            return self._execute_fresh_setup(state)
+
+        print("✓ Using existing knowledge graph")
+        self._print_next_steps(state)
         return True
 
-    def run_test_queries(self) -> bool:
-        """Run test queries against the graph."""
+    def _execute_init(self, state: SystemState) -> bool:
+        """
+        Initialize only the Neo4j server and project directories.
+        The database remains empty for manual data population.
+        """
+        print("\n🔧 Initializing environment...")
+
+        if self.learning_mode:
+            print(textwrap.dedent("""\
+
+                📚 What's happening:
+                  1. Starting Neo4j server if not running
+                  2. Creating project directory structure
+                  3. Database will remain empty for manual data population
+            """))
+
+        if not state.connection.connected:
+            print("\n🚀 Starting Neo4j server...")
+            init_docker_status = detect_docker_neo4j_status()
+
+            if init_docker_status.neo4j_container_id and not init_docker_status.container_running:
+                self._start_existing_neo4j_container()
+                print("⏳ Waiting for Neo4j to be ready...")
+                time.sleep(5)
+            elif not init_docker_status.neo4j_container_id:
+                if not self._provision_neo4j_via_docker():
+                    print("❌ Failed to start Neo4j")
+                    return False
+
+            verified_connection = self.neo4j_checker.check_connection()
+            if not verified_connection.connected:
+                print("❌ Could not establish Neo4j connection")
+                self._print_docker_troubleshooting()
+                return False
+
+        print("\n📁 Creating project structure...")
+        self._create_project_directories()
+
+        print(textwrap.dedent(f"""\
+
+            🌐 Neo4j Server Active:
+              📊 Neo4j Browser: {NEO4J_BROWSER_URL}
+              🔌 Bolt Protocol:  {NEO4J_BOLT_URL}
+              👤 Username: {NEO4J_USERNAME}
+              🔑 Password: {NEO4J_PASSWORD}"""))
+
+        if state.has_data:
+            print(textwrap.dedent(f"""\
+
+                📊 Current Database Status:
+                  ⚠️  Database contains {state.stats.total_nodes} nodes
+                  💡 Use --fresh to clear and rebuild, or --continue to use existing data"""))
+        else:
+            print(textwrap.dedent("""\
+
+                📊 Current Database Status:
+                  ✓ Database is empty and ready"""))
+
+        print(textwrap.dedent("""\
+
+            🎯 Next Steps:
+              1. Generate sample CVs:
+                 uv run 1_generate_data.py
+              2. Build knowledge graph:
+                 uv run 2_data_to_knowledge_graph.py
+              3. Query the graph:
+                 uv run 3_query_knowledge_graph.py
+
+            ✅ Initialization complete!"""))
+
+        return True
+
+    def _run_child_script(self, script_name: str) -> bool:
+        """Execute a companion Python script as a subprocess."""
+        try:
+            if self.learning_mode:
+                print(f"  📝 Running {script_name}...")
+
+            subprocess_result = subprocess.run(
+                [sys.executable, script_name],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+
+            if subprocess_result.returncode == 0:
+                print(f"✓ {script_name} completed successfully")
+                return True
+
+            print(textwrap.dedent(f"""\
+                ❌ {script_name} failed:
+                Error: {subprocess_result.stderr}"""))
+            return False
+
+        except subprocess.TimeoutExpired:
+            print(f"❌ {script_name} timed out")
+            return False
+        except OSError as exc:
+            print(f"❌ Error running {script_name}: {exc}")
+            return False
+
+    @staticmethod
+    def _create_project_directories() -> None:
+        """Ensure all required project directories exist."""
+        for directory_path in PROJECT_DIRECTORIES:
+            Path(directory_path).mkdir(parents=True, exist_ok=True)
+        print("✓ Project structure created")
+
+    @staticmethod
+    def _provision_neo4j_via_docker() -> bool:
+        """Create a docker-compose file if missing and start Neo4j."""
+        print("\n🐳 Setting up Neo4j with Docker...")
+
+        compose_file = Path("docker-compose.yml")
+        if not compose_file.exists():
+            print("Creating docker-compose.yml...")
+            compose_file.write_text(DOCKER_COMPOSE_TEMPLATE)
+            print("✓ Created docker-compose.yml")
+
+        try:
+            compose_result = subprocess.run(
+                ["docker-compose", "up", "-d"],
+                capture_output=True,
+                text=True,
+            )
+
+            if compose_result.returncode == 0:
+                print(textwrap.dedent("""\
+                    ✓ Neo4j started with Docker Compose
+                    ⏳ Waiting for Neo4j to be ready..."""))
+                time.sleep(15)
+                return True
+
+            print(f"❌ Failed to start Neo4j: {compose_result.stderr}")
+            return False
+
+        except OSError as exc:
+            print(f"❌ Error starting Neo4j: {exc}")
+            return False
+
+    @staticmethod
+    def _start_existing_neo4j_container() -> None:
+        """Restart a previously created but stopped Neo4j container."""
+        try:
+            existing_container_status = detect_docker_neo4j_status()
+            if existing_container_status.neo4j_container_id:
+                start_result = subprocess.run(
+                    ["docker", "start", existing_container_status.neo4j_container_id],
+                    capture_output=True,
+                    text=True,
+                )
+                if start_result.returncode == 0:
+                    print("✓ Neo4j container started")
+                else:
+                    print(f"⚠️  Could not start container: {start_result.stderr}")
+        except OSError as exc:
+            print(f"⚠️  Error starting container: {exc}")
+
+    @staticmethod
+    def _print_next_steps(state: SystemState) -> None:
+        """Print context-aware guidance for what to do next."""
+        if state.has_programmers:
+            query_guidance = textwrap.dedent("""\
+                • Try some queries:
+                  python 3_query_knowledge_graph.py
+                • Test GraphRAG vs Naive RAG:
+                  python 5_compare_systems.py""")
+        else:
+            query_guidance = textwrap.dedent("""\
+                • Generate some data first:
+                  python 1_generate_data.py""")
+
+        print(textwrap.dedent(f"""\
+
+            🎯 Next Steps:
+            {'-' * 30}
+            {query_guidance}
+            • Explore in Neo4j Browser:
+              {NEO4J_BROWSER_URL}
+              Username: {NEO4J_USERNAME}, Password: {NEO4J_PASSWORD}"""))
+
+    @staticmethod
+    def _print_help() -> None:
+        """Display a detailed overview of the GraphRAG project and its files."""
+        print(textwrap.dedent(f"""\
+
+            📚 GraphRAG Setup Help
+            {'=' * 30}
+
+            This system demonstrates GraphRAG (Graph Retrieval Augmented Generation)
+            for a programmer staffing use case.
+
+            Components:
+            • Neo4j: Graph database for storing relationships
+            • Azure OpenAI: LLM for text processing and queries
+            • LangChain: Framework connecting LLMs to data
+
+            Workflow:
+            1. Generate synthetic programmer CVs and project data
+            2. Extract knowledge graph from unstructured PDFs
+            3. Query the graph using natural language
+            4. Compare with traditional RAG approaches
+
+            Files:
+            • 1_generate_data.py: Create sample CVs and projects
+            • 2_data_to_knowledge_graph.py: Build graph from PDFs
+            • 3_query_knowledge_graph.py: Query the graph
+            • 4_graph_rag_system.py: Full GraphRAG implementation
+            • 5_compare_systems.py: Compare different approaches
+        """))
+
+    @staticmethod
+    def _print_docker_troubleshooting() -> None:
+        """Print common Docker troubleshooting steps."""
+        print(textwrap.dedent("""\
+
+            🔧 Docker Troubleshooting:
+            1. Make sure Docker Desktop is running
+            2. Try: docker-compose up -d
+            3. Check logs: docker-compose logs neo4j
+            4. Reset: docker-compose down && docker-compose up -d
+        """))
+
+    @staticmethod
+    def _ask_for_confirmation(prompt_message: str) -> bool:
+        """Ask the user for yes/no confirmation."""
+        while True:
+            user_response = input(f"{prompt_message} (y/N): ").strip().lower()
+            if user_response in ("y", "yes"):
+                return True
+            if user_response in ("n", "no", ""):
+                return False
+            print("Please enter 'y' or 'n'")
+
+    @staticmethod
+    def _extend_existing_data() -> bool:
+        """Placeholder for extending an existing knowledge graph with new data."""
+        print(textwrap.dedent("""\
+
+            📈 Extending existing knowledge graph...
+            This feature is coming soon!"""))
+        return True
+
+    def _run_test_queries(self) -> bool:
+        """Execute the query script to validate the knowledge graph contents."""
         print("\n🧪 Running test queries...")
-        return self.run_script("3_query_knowledge_graph.py")
+        return self._run_child_script("3_query_knowledge_graph.py")
 
-    def backup_data(self) -> bool:
-        """Backup current graph data."""
-        print("\n💾 Backing up data...")
-        print("This feature is coming soon!")
+    @staticmethod
+    def _backup_data() -> bool:
+        """Placeholder for exporting the current graph state to a backup file."""
+        print(textwrap.dedent("""\
+
+            💾 Backing up data...
+            This feature is coming soon!"""))
         return True
 
-    def load_sample_data(self) -> bool:
-        """Load pre-built sample data."""
+    def _load_sample_data(self) -> bool:
+        """Generate sample programmer CVs and project descriptions."""
         print("\n📦 Loading sample data...")
-        return self.run_script("1_generate_data.py")
+        return self._run_child_script("1_generate_data.py")
 
 
-def parse_arguments():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
+def parse_command_line_arguments() -> ParsedSetupConfig:
+    """Parse CLI flags and return a structured setup configuration."""
+    argument_parser = argparse.ArgumentParser(
         description="GraphRAG Educational Setup System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -831,54 +881,55 @@ Examples:
   python 0_setup.py --continue      # Use existing data
   python 0_setup.py --check         # Check status only
   python 0_setup.py --learning      # Educational mode with explanations
-        """
+        """,
     )
 
-    parser.add_argument('--init', action='store_true',
-                        help='Initialize Neo4j and project structure only')
-    parser.add_argument('--fresh', action='store_true',
-                        help='Force fresh setup (clears existing data)')
-    parser.add_argument('--continue', action='store_true', dest='continue_mode',
-                        help='Continue with existing data')
-    parser.add_argument('--check', action='store_true',
-                        help='Check status only')
-    parser.add_argument('--learning', action='store_true',
-                        help='Enable educational explanations')
+    argument_parser.add_argument("--init", action="store_true",
+                                 help="Initialize Neo4j and project structure only")
+    argument_parser.add_argument("--fresh", action="store_true",
+                                 help="Force fresh setup (clears existing data)")
+    argument_parser.add_argument("--continue", action="store_true", dest="continue_mode",
+                                 help="Continue with existing data")
+    argument_parser.add_argument("--check", action="store_true",
+                                 help="Check status only")
+    argument_parser.add_argument("--learning", action="store_true",
+                                 help="Enable educational explanations")
 
-    args = parser.parse_args()
+    parsed_args = argument_parser.parse_args()
 
-    # Determine mode
-    if args.init:
-        mode = SetupMode.INIT
-    elif args.fresh:
-        mode = SetupMode.FRESH
-    elif args.continue_mode:
-        mode = SetupMode.CONTINUE
-    elif args.check:
-        mode = SetupMode.CHECK
-    elif args.learning:
-        mode = SetupMode.LEARNING
+    if parsed_args.init:
+        selected_mode = SetupMode.INIT
+    elif parsed_args.fresh:
+        selected_mode = SetupMode.FRESH
+    elif parsed_args.continue_mode:
+        selected_mode = SetupMode.CONTINUE
+    elif parsed_args.check:
+        selected_mode = SetupMode.CHECK
+    elif parsed_args.learning:
+        selected_mode = SetupMode.LEARNING
     else:
-        mode = SetupMode.INTERACTIVE
+        selected_mode = SetupMode.INTERACTIVE
 
-    return mode, args.learning
+    return ParsedSetupConfig(mode=selected_mode, learning_mode=parsed_args.learning)
 
 
-def main():
-    """Main entry point."""
+def main() -> None:
     try:
-        mode, learning_mode = parse_arguments()
-        setup = GraphRAGSetup(mode=mode, learning_mode=learning_mode)
-        success = setup.main()
+        parsed_config = parse_command_line_arguments()
+        setup = GraphRAGSetup(mode=parsed_config.mode, learning_mode=parsed_config.learning_mode)
+        setup_succeeded = setup.run()
 
-        if not success:
+        if not setup_succeeded:
             sys.exit(1)
 
     except KeyboardInterrupt:
         print("\n\n👋 Setup cancelled by user")
         sys.exit(0)
-    except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+    except (OSError, subprocess.SubprocessError, GqlError) as known_error:
+        print(f"\n❌ Setup error: {known_error}")
+        sys.exit(1)
+    except Exception as unexpected_error:
+        print(f"\n❌ Unexpected error: {unexpected_error}")
         sys.exit(1)
 
 

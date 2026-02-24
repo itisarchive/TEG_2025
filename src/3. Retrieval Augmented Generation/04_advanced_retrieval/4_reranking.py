@@ -1,110 +1,40 @@
 """
-Re-ranking for Post-Retrieval Optimization
-==========================================
+🎯 Re-ranking for Post-Retrieval Optimization
+==============================================
 
-Demonstrates cross-encoder re-ranking, LLM-based scoring, and result optimization
-techniques to improve retrieval quality after initial search.
+Demonstrates cross-encoder re-ranking, LLM-based relevance scoring, and result
+diversity optimization to improve retrieval quality after initial vector search.
+
+🎯 What You'll Learn:
+- Cross-encoder models for pairwise query-document scoring
+- LLM-based relevance scoring with structured output
+- Diversity-aware re-ranking to avoid redundant results
+- Ensemble re-ranking combining multiple scoring methods
+- Performance vs. quality trade-offs across re-ranking strategies
+
+🔧 Prerequisites:
+- Azure OpenAI credentials in .env file
+- Python 3.13+ with langchain, langchain-openai, sentence-transformers
+- Scientist biography .txt files in data/scientists_bios/
 """
 
 import os
+import textwrap
 import time
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
+from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from sentence_transformers import CrossEncoder
 
-load_dotenv(override=True)
+SCIENTISTS_BIOS_DIR = "src/3. Retrieval Augmented Generation/04_advanced_retrieval/data/scientists_bios"
 
-print("🎯 RE-RANKING DEMONSTRATION")
-print("=" * 50)
-
-# 1. Load and Prepare Documents
-print("\n1️⃣ Loading documents for re-ranking:")
-
-data_dir = "src/3. Retrieval Augmented Generation/04_advanced_retrieval/data/scientists_bios"
-loader = DirectoryLoader(data_dir, glob="*.txt")
-documents = loader.load()
-
-# Add metadata
-for doc in documents:
-    filename = os.path.basename(doc.metadata['source']).replace('.txt', '')
-    doc.metadata['scientist_name'] = filename
-
-# Chunk documents
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=800,
-    chunk_overlap=100
-)
-chunks = text_splitter.split_documents(documents)
-
-print(f"   Loaded {len(documents)} documents, created {len(chunks)} chunks")
-
-# Build vector store
-embeddings = AzureOpenAIEmbeddings(model="text-embedding-3-small")
-vector_store = InMemoryVectorStore(embeddings)
-vector_store.add_documents(documents=chunks)
-
-print(f"   ✅ Vector store ready with {len(chunks)} indexed chunks")
-
-# 2. Load Cross-Encoder Models
-print("\n2️⃣ Loading cross-encoder models for re-ranking:")
-
-# Load different cross-encoder models for comparison
-cross_encoders = {}
-
-try:
-    # Lightweight cross-encoder for general ranking
-    cross_encoders['ms-marco'] = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-    print("   ✅ MS-MARCO MiniLM cross-encoder loaded")
-except Exception as e:
-    print(f"   ⚠️ Failed to load MS-MARCO model: {e}")
-
-try:
-    # More specific cross-encoder for question-answering
-    cross_encoders['qnli'] = CrossEncoder('cross-encoder/qnli-electra-base')
-    print("   ✅ QNLI Electra cross-encoder loaded")
-except Exception as e:
-    print(f"   ⚠️ Failed to load QNLI model: {e}")
-
-if not cross_encoders:
-    print("   ⚠️ No cross-encoders loaded, using fallback scoring")
-
-# 3. Basic Re-ranking Functions
-print("\n3️⃣ Implementing re-ranking functions:")
-
-
-def cross_encoder_rerank(query, documents, model_name='ms-marco', top_k=None):
-    """Re-rank documents using cross-encoder models."""
-    if model_name not in cross_encoders:
-        print(f"   ⚠️ Model {model_name} not available, returning original order")
-        return documents
-
-    model = cross_encoders[model_name]
-
-    # Prepare query-document pairs
-    query_doc_pairs = [(query, doc.page_content) for doc in documents]
-
-    # Get relevance scores
-    scores = model.predict(query_doc_pairs)
-
-    # Sort documents by scores
-    doc_score_pairs = list(zip(documents, scores))
-    doc_score_pairs.sort(key=lambda x: x[1], reverse=True)
-
-    # Return top_k or all documents
-    if top_k:
-        return doc_score_pairs[:top_k]
-    else:
-        return doc_score_pairs
-
-
-def llm_relevance_scoring(query, documents, llm):
-    """Use LLM to score document relevance."""
-    relevance_prompt = ChatPromptTemplate.from_template("""
+LLM_RELEVANCE_PROMPT = ChatPromptTemplate.from_template("""\
 Rate the relevance of the following document to the query on a scale of 1-10.
 Consider how well the document answers the question or provides relevant information.
 
@@ -117,247 +47,7 @@ Score: [number]
 Reason: [brief explanation]
 """)
 
-    scored_documents = []
-
-    for doc in documents:
-        try:
-            response = llm.invoke(
-                relevance_prompt.format(
-                    query=query,
-                    document=doc.page_content[:500]  # Limit content for efficiency
-                )
-            )
-
-            # Extract score from response
-            content = response.content
-            score_line = [line for line in content.split('\n') if line.startswith('Score:')]
-
-            if score_line:
-                score_text = score_line[0].replace('Score:', '').strip()
-                try:
-                    score = float(score_text.split()[0])  # Take first number
-                    scored_documents.append((doc, score))
-                except:
-                    scored_documents.append((doc, 5.0))  # Default score
-            else:
-                scored_documents.append((doc, 5.0))  # Default score
-
-        except Exception as e:
-            print(f"   ⚠️ LLM scoring failed for document: {e}")
-            scored_documents.append((doc, 5.0))  # Default score
-
-    # Sort by score
-    scored_documents.sort(key=lambda x: x[1], reverse=True)
-    return scored_documents
-
-
-def diversity_rerank(documents, diversity_threshold=0.7):
-    """Re-rank to promote diversity while maintaining relevance."""
-    if not documents:
-        return documents
-
-    # Start with highest scoring document
-    diverse_docs = [documents[0]]
-    remaining_docs = documents[1:]
-
-    # Simple diversity based on scientist names
-    selected_scientists = {documents[0][0].metadata['scientist_name']}
-
-    for doc, score in remaining_docs:
-        scientist = doc.metadata['scientist_name']
-
-        # Add document if it's from a new scientist or if we have room
-        if scientist not in selected_scientists or len(diverse_docs) < 3:
-            diverse_docs.append((doc, score))
-            selected_scientists.add(scientist)
-
-        # Stop if we have enough diverse results
-        if len(diverse_docs) >= len(documents) * 0.8:  # Take 80% of results
-            break
-
-    # Add remaining high-scoring documents
-    for doc, score in remaining_docs:
-        if (doc, score) not in diverse_docs and len(diverse_docs) < len(documents):
-            diverse_docs.append((doc, score))
-
-    return diverse_docs
-
-
-# 4. Test Individual Re-ranking Methods
-print("\n4️⃣ Testing individual re-ranking methods:")
-
-# Get initial results for testing
-test_query = "What did Einstein discover about the universe?"
-initial_results = vector_store.similarity_search_with_score(test_query, k=6)
-
-print(f"\n   🔍 Test query: {test_query}")
-print(f"\n   📊 Initial vector search results:")
-for i, (doc, score) in enumerate(initial_results):
-    scientist = doc.metadata['scientist_name']
-    preview = doc.page_content[:60] + "..."
-    print(f"      {i + 1}. {scientist} (score: {score:.3f}): {preview}")
-
-# Test cross-encoder re-ranking
-if cross_encoders:
-    print(f"\n   🎯 Cross-encoder re-ranking:")
-    documents_only = [doc for doc, score in initial_results]
-
-    for model_name in cross_encoders:
-        reranked = cross_encoder_rerank(test_query, documents_only, model_name, top_k=4)
-        print(f"\n   {model_name.upper()} re-ranking:")
-        for i, (doc, score) in enumerate(reranked):
-            scientist = doc.metadata['scientist_name']
-            preview = doc.page_content[:60] + "..."
-            print(f"      {i + 1}. {scientist} (score: {score:.3f}): {preview}")
-
-# Test LLM re-ranking
-llm = AzureChatOpenAI(model="gpt-5-nano")
-print(f"\n   🤖 LLM relevance scoring:")
-llm_reranked = llm_relevance_scoring(test_query, documents_only[:4], llm)
-for i, (doc, score) in enumerate(llm_reranked):
-    scientist = doc.metadata['scientist_name']
-    preview = doc.page_content[:60] + "..."
-    print(f"      {i + 1}. {scientist} (score: {score:.1f}): {preview}")
-
-# Test diversity re-ranking
-print(f"\n   🌈 Diversity re-ranking:")
-diverse_reranked = diversity_rerank(initial_results[:6])
-for i, (doc, score) in enumerate(diverse_reranked):
-    scientist = doc.metadata['scientist_name']
-    preview = doc.page_content[:60] + "..."
-    print(f"      {i + 1}. {scientist} (orig score: {score:.3f}): {preview}")
-
-# 5. Ensemble Re-ranking
-print("\n5️⃣ Ensemble re-ranking:")
-
-
-def ensemble_rerank(query, documents, methods=['cross_encoder', 'llm'], weights=None):
-    """Combine multiple re-ranking methods."""
-    if weights is None:
-        weights = [1.0] * len(methods)
-
-    # Normalize weights
-    total_weight = sum(weights)
-    weights = [w / total_weight for w in weights]
-
-    # Store scores for each method as lists
-    all_method_scores = []
-
-    for method in methods:
-        if method == 'cross_encoder' and cross_encoders:
-            model_name = list(cross_encoders.keys())[0]  # Use first available
-            reranked = cross_encoder_rerank(query, documents, model_name)
-            # Create score list in same order as documents
-            scores = []
-            reranked_dict = {doc.page_content: score for doc, score in reranked}
-            for doc in documents:
-                scores.append(reranked_dict.get(doc.page_content, 0))
-            all_method_scores.append(scores)
-
-        elif method == 'llm':
-            reranked = llm_relevance_scoring(query, documents[:len(documents)], llm)
-            # Normalize LLM scores to 0-1 range
-            max_score = max(score for _, score in reranked) if reranked else 10
-            scores = []
-            reranked_dict = {doc.page_content: score / max_score for doc, score in reranked}
-            for doc in documents:
-                scores.append(reranked_dict.get(doc.page_content, 0))
-            all_method_scores.append(scores)
-
-    # Combine scores
-    final_scores = []
-    for i, doc in enumerate(documents):
-        combined_score = 0
-        for j, method_scores in enumerate(all_method_scores):
-            if i < len(method_scores):
-                combined_score += weights[j] * method_scores[i]
-        final_scores.append((doc, combined_score))
-
-    # Sort by combined scores
-    final_scores.sort(key=lambda x: x[1], reverse=True)
-    return final_scores
-
-
-# Test ensemble re-ranking
-ensemble_methods = ['llm']
-if cross_encoders:
-    ensemble_methods.append('cross_encoder')
-
-print(f"\n   🎭 Ensemble re-ranking (methods: {ensemble_methods}):")
-ensemble_reranked = ensemble_rerank(
-    test_query,
-    documents_only[:5],
-    methods=ensemble_methods,
-    weights=[0.6, 0.4] if len(ensemble_methods) > 1 else [1.0]
-)
-
-for i, (doc, score) in enumerate(ensemble_reranked):
-    scientist = doc.metadata['scientist_name']
-    preview = doc.page_content[:60] + "..."
-    print(f"      {i + 1}. {scientist} (ensemble: {score:.3f}): {preview}")
-
-# 6. Performance vs Quality Analysis
-print("\n6️⃣ Performance vs quality analysis:")
-
-
-def benchmark_reranking_methods(queries, k=5):
-    """Benchmark different re-ranking methods."""
-    methods = ['baseline', 'llm']
-    if cross_encoders:
-        methods.append('cross_encoder')
-
-    results = {method: {'total_time': 0, 'queries_processed': 0} for method in methods}
-
-    for query in queries:
-        # Get initial results
-        initial_docs = vector_store.similarity_search(query, k=k * 2)
-
-        for method in methods:
-            start_time = time.time()
-
-            if method == 'baseline':
-                # No re-ranking, just return initial results
-                final_docs = initial_docs[:k]
-
-            elif method == 'cross_encoder' and cross_encoders:
-                model_name = list(cross_encoders.keys())[0]
-                reranked = cross_encoder_rerank(query, initial_docs, model_name, top_k=k)
-                final_docs = [doc for doc, score in reranked]
-
-            elif method == 'llm':
-                reranked = llm_relevance_scoring(query, initial_docs[:k], llm)
-                final_docs = [doc for doc, score in reranked]
-
-            end_time = time.time()
-            processing_time = end_time - start_time
-
-            results[method]['total_time'] += processing_time
-            results[method]['queries_processed'] += 1
-
-    return results
-
-
-# Run benchmark
-benchmark_queries = [
-    "Einstein's theories",
-    "Newton's discoveries",
-    "Marie Curie research"
-]
-
-print(f"\n   ⏱️ Benchmarking re-ranking methods:")
-benchmark_results = benchmark_reranking_methods(benchmark_queries, k=3)
-
-print(f"   {'Method':<15} {'Avg Time (s)':<15} {'Queries':<10}")
-print("   " + "-" * 45)
-
-for method, data in benchmark_results.items():
-    avg_time = data['total_time'] / data['queries_processed'] if data['queries_processed'] > 0 else 0
-    print(f"   {method:<15} {avg_time:<15.3f} {data['queries_processed']:<10}")
-
-# 7. Re-ranking RAG System
-print("\n7️⃣ Building re-ranking RAG system:")
-
-rerank_rag_prompt = ChatPromptTemplate.from_template("""
+RERANK_RAG_PROMPT = ChatPromptTemplate.from_template("""\
 You are an assistant for question-answering tasks about scientists and their contributions.
 The context below was retrieved and then re-ranked to ensure the most relevant information appears first.
 
@@ -372,154 +62,587 @@ Re-ranked context: {context}
 Answer:
 """)
 
+ScoredDocument = tuple[Document, float]
 
-def reranking_rag_chain(query, rerank_method='llm', k=4):
-    """RAG chain with re-ranking."""
-    # Get initial results (more than needed)
-    initial_results = vector_store.similarity_search(query, k=k * 2)
+DEFAULT_LLM_RELEVANCE_SCORE = 5.0
 
-    # Apply re-ranking
-    if rerank_method == 'cross_encoder' and cross_encoders:
-        model_name = list(cross_encoders.keys())[0]
-        reranked = cross_encoder_rerank(query, initial_results, model_name, top_k=k)
-        final_docs = [doc for doc, score in reranked]
-        scores = [score for doc, score in reranked]
 
-    elif rerank_method == 'llm':
-        reranked = llm_relevance_scoring(query, initial_results[:k + 2], llm)
-        final_docs = [doc for doc, score in reranked[:k]]
-        scores = [score for doc, score in reranked[:k]]
+def print_section_header(title: str) -> None:
+    separator = "=" * 60
+    print(f"\n{separator}\n{title}\n{separator}")
 
-    elif rerank_method == 'ensemble':
-        ensemble_methods = ['llm']
-        if cross_encoders:
-            ensemble_methods.append('cross_encoder')
-        reranked = ensemble_rerank(query, initial_results[:k + 2], methods=ensemble_methods)
-        final_docs = [doc for doc, score in reranked[:k]]
-        scores = [score for doc, score in reranked[:k]]
 
-    else:  # baseline
-        final_docs = initial_results[:k]
-        scores = [1.0] * len(final_docs)  # Dummy scores
+def print_scored_results(results: list[ScoredDocument], *, label: str, score_label: str = "score") -> None:
+    print(f"\n   {label}:")
+    for rank, (doc, score) in enumerate(results, start=1):
+        scientist_name = doc.metadata["scientist_name"]
+        content_preview = doc.page_content[:60] + "..."
+        print(f"      {rank}. {scientist_name} ({score_label}: {score:.3f}): {content_preview}")
 
-    # Format context
-    context_parts = []
-    for i, doc in enumerate(final_docs):
-        scientist = doc.metadata['scientist_name']
-        context_parts.append(f"Source {i + 1} ({scientist}): {doc.page_content}")
 
-    context = "\n\n".join(context_parts)
+@dataclass(frozen=True)
+class BenchmarkResult:
+    """Timing stats for a single re-ranking method across multiple queries."""
 
-    # Generate response
-    response = llm.invoke(
-        rerank_rag_prompt.format(question=query, context=context)
+    total_time: float
+    queries_processed: int
+
+    @property
+    def average_time(self) -> float:
+        return self.total_time / self.queries_processed if self.queries_processed > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class EffectivenessStats:
+    """Diversity and coverage stats for a re-ranking method on a single query."""
+
+    unique_scientist_count: int
+    total_document_count: int
+
+    @property
+    def diversity_ratio(self) -> float:
+        return self.unique_scientist_count / self.total_document_count if self.total_document_count > 0 else 0.0
+
+
+@dataclass
+class CrossEncoderRegistry:
+    """Manages loading and access to cross-encoder models."""
+
+    models: dict[str, CrossEncoder] = field(default_factory=dict)
+
+    def load_model(self, *, name: str, model_id: str) -> None:
+        try:
+            self.models[name] = CrossEncoder(model_id)
+            print(f"   ✅ {name} cross-encoder loaded")
+        except Exception as load_error:
+            print(f"   ⚠️ Failed to load {name} model: {load_error}")
+
+    def has_models(self) -> bool:
+        return len(self.models) > 0
+
+    def first_model_name(self) -> str:
+        return next(iter(self.models))
+
+
+def load_and_index_scientist_chunks() -> tuple[list[Document], InMemoryVectorStore]:
+    """
+    Loads scientist biographies, attaches metadata, splits into chunks,
+    and indexes them in a vector store for similarity search.
+    """
+    print_section_header("1️⃣  LOADING DOCUMENTS FOR RE-RANKING")
+
+    loader = DirectoryLoader(SCIENTISTS_BIOS_DIR, glob="*.txt")
+    raw_documents = loader.load()
+
+    for doc in raw_documents:
+        filename = os.path.basename(doc.metadata["source"]).replace(".txt", "")
+        doc.metadata["scientist_name"] = filename
+
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    chunks = text_splitter.split_documents(raw_documents)
+
+    print(f"   Loaded {len(raw_documents)} documents, created {len(chunks)} chunks")
+
+    azure_embeddings = AzureOpenAIEmbeddings(model="text-embedding-3-small")
+    vector_store = InMemoryVectorStore(azure_embeddings)
+    vector_store.add_documents(documents=chunks)
+
+    print(f"   ✅ Vector store ready with {len(chunks)} indexed chunks")
+    return chunks, vector_store
+
+
+def load_cross_encoder_models() -> CrossEncoderRegistry:
+    """
+    Cross-encoders score query-document pairs jointly (unlike bi-encoders which
+    encode them independently). This produces more accurate relevance scores
+    at the cost of higher latency — ideal for re-ranking a small candidate set.
+    """
+    print_section_header("2️⃣  LOADING CROSS-ENCODER MODELS")
+    print(textwrap.dedent(load_cross_encoder_models.__doc__))
+
+    registry = CrossEncoderRegistry()
+    registry.load_model(name="ms-marco", model_id="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    registry.load_model(name="qnli", model_id="cross-encoder/qnli-electra-base")
+
+    if not registry.has_models():
+        print("   ⚠️ No cross-encoders loaded, using fallback scoring")
+
+    return registry
+
+
+def rerank_by_cross_encoder(
+        registry: CrossEncoderRegistry,
+        query: str,
+        documents: list[Document],
+        *,
+        model_name: str = "ms-marco",
+        max_results: int | None = None,
+) -> list[ScoredDocument]:
+    """Re-ranks documents using a cross-encoder model for pairwise query-document scoring."""
+    if model_name not in registry.models:
+        print(f"   ⚠️ Model {model_name} not available, returning original order")
+        return [(doc, 0.0) for doc in documents]
+
+    encoder = registry.models[model_name]
+    query_document_pairs = [(query, doc.page_content) for doc in documents]
+    relevance_scores = encoder.predict(query_document_pairs)
+
+    scored_pairs = sorted(
+        zip(documents, relevance_scores, strict=True),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    result = [(doc, float(score)) for doc, score in scored_pairs]
+    return result[:max_results] if max_results else result
+
+
+def _extract_relevance_score(llm_response_content: str) -> float:
+    """Parses a numeric score from the LLM's 'Score: X' response line."""
+    for line in llm_response_content.split("\n"):
+        if line.strip().startswith("Score:"):
+            score_text = line.replace("Score:", "").strip()
+            try:
+                return float(score_text.split()[0])
+            except (ValueError, IndexError):
+                return DEFAULT_LLM_RELEVANCE_SCORE
+    return DEFAULT_LLM_RELEVANCE_SCORE
+
+
+def rerank_by_llm_relevance(
+        llm: AzureChatOpenAI,
+        query: str,
+        documents: list[Document],
+) -> list[ScoredDocument]:
+    """Uses the LLM to score each document's relevance to the query on a 1–10 scale."""
+    scored_documents: list[ScoredDocument] = []
+
+    for doc in documents:
+        try:
+            llm_response = llm.invoke(
+                LLM_RELEVANCE_PROMPT.format(
+                    query=query,
+                    document=doc.page_content[:500],
+                )
+            )
+            relevance_score = _extract_relevance_score(llm_response.content)
+        except Exception as scoring_error:
+            print(f"   ⚠️ LLM scoring failed for document: {scoring_error}")
+            relevance_score = DEFAULT_LLM_RELEVANCE_SCORE
+
+        scored_documents.append((doc, relevance_score))
+
+    scored_documents.sort(key=lambda pair: pair[1], reverse=True)
+    return scored_documents
+
+
+def rerank_for_diversity(
+        scored_documents: list[ScoredDocument],
+        *,
+        coverage_ratio: float = 0.8,
+) -> list[ScoredDocument]:
+    """
+    Re-ranks to promote scientist diversity while preserving relevance order.
+    Documents from not-yet-seen scientists are prioritized; once coverage_ratio
+    of the original list size is reached, remaining documents fill the tail.
+    """
+    if not scored_documents:
+        return scored_documents
+
+    diverse_results: list[ScoredDocument] = [scored_documents[0]]
+    seen_scientists: set[str] = {scored_documents[0][0].metadata["scientist_name"]}
+    target_count = int(len(scored_documents) * coverage_ratio)
+
+    for doc, score in scored_documents[1:]:
+        scientist_name = doc.metadata["scientist_name"]
+        if scientist_name not in seen_scientists or len(diverse_results) < 3:
+            diverse_results.append((doc, score))
+            seen_scientists.add(scientist_name)
+        if len(diverse_results) >= target_count:
+            break
+
+    already_selected = {id(doc) for doc, _ in diverse_results}
+    for doc, score in scored_documents[1:]:
+        if id(doc) not in already_selected and len(diverse_results) < len(scored_documents):
+            diverse_results.append((doc, score))
+
+    return diverse_results
+
+
+def demonstrate_individual_reranking(
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+        llm: AzureChatOpenAI,
+) -> None:
+    """
+    Compares three re-ranking approaches on the same initial retrieval set:
+    • Cross-encoder: pairwise neural scoring (most accurate, slower)
+    • LLM relevance: generative scoring with reasoning (flexible, slowest)
+    • Diversity: promotes variety across scientists (fast, heuristic)
+    """
+    print_section_header("3️⃣  TESTING INDIVIDUAL RE-RANKING METHODS")
+    print(textwrap.dedent(demonstrate_individual_reranking.__doc__))
+
+    test_query = "What did Einstein discover about the universe?"
+    initial_results = vector_store.similarity_search_with_score(test_query, k=6)
+
+    print(f"\n   🔍 Test query: {test_query}")
+    print_scored_results(initial_results, label="📊 Initial vector search results")
+
+    documents_for_reranking = [doc for doc, _score in initial_results]
+
+    if registry.has_models():
+        for encoder_name in registry.models:
+            cross_encoder_results = rerank_by_cross_encoder(
+                registry, test_query, documents_for_reranking,
+                model_name=encoder_name, max_results=4,
+            )
+            print_scored_results(cross_encoder_results, label=f"🎯 {encoder_name.upper()} re-ranking")
+
+    llm_results = rerank_by_llm_relevance(llm, test_query, documents_for_reranking[:4])
+    print_scored_results(llm_results, label="🤖 LLM relevance scoring")
+
+    diversity_results = rerank_for_diversity(initial_results[:6])
+    print_scored_results(diversity_results, label="🌈 Diversity re-ranking", score_label="orig score")
+
+
+def ensemble_rerank(
+        llm: AzureChatOpenAI,
+        registry: CrossEncoderRegistry,
+        query: str,
+        documents: list[Document],
+        *,
+        method_names: tuple[str, ...] = ("cross_encoder", "llm"),
+        method_weights: tuple[float, ...] | None = None,
+) -> list[ScoredDocument]:
+    """
+    Combines scores from multiple re-ranking methods using weighted averaging.
+    Each method scores all documents independently, scores are normalized,
+    then combined with the specified weights.
+    """
+    active_weights = method_weights or tuple(1.0 for _ in method_names)
+    total_weight = sum(active_weights)
+    normalized_weights = [weight / total_weight for weight in active_weights]
+
+    all_method_scores: list[list[float]] = []
+
+    for method_name in method_names:
+        if method_name == "cross_encoder" and registry.has_models():
+            encoder_name = registry.first_model_name()
+            reranked = rerank_by_cross_encoder(registry, query, documents, model_name=encoder_name)
+            score_by_content = {doc.page_content: score for doc, score in reranked}
+            all_method_scores.append([score_by_content.get(doc.page_content, 0.0) for doc in documents])
+
+        elif method_name == "llm":
+            reranked = rerank_by_llm_relevance(llm, query, documents)
+            max_score = max((score for _, score in reranked), default=10.0)
+            score_by_content = {doc.page_content: score / max_score for doc, score in reranked}
+            all_method_scores.append([score_by_content.get(doc.page_content, 0.0) for doc in documents])
+
+    combined_scores: list[ScoredDocument] = []
+    for doc_index, doc in enumerate(documents):
+        weighted_sum = sum(
+            normalized_weights[method_index] * method_scores[doc_index]
+            for method_index, method_scores in enumerate(all_method_scores)
+            if doc_index < len(method_scores)
+        )
+        combined_scores.append((doc, weighted_sum))
+
+    combined_scores.sort(key=lambda pair: pair[1], reverse=True)
+    return combined_scores
+
+
+def demonstrate_ensemble_reranking(
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+        llm: AzureChatOpenAI,
+) -> None:
+    """
+    Ensemble re-ranking fuses scores from multiple methods (cross-encoder + LLM)
+    with configurable weights. This often outperforms any single method by
+    combining neural precision with generative reasoning.
+    """
+    print_section_header("4️⃣  ENSEMBLE RE-RANKING")
+    print(textwrap.dedent(demonstrate_ensemble_reranking.__doc__))
+
+    test_query = "What did Einstein discover about the universe?"
+    initial_results = vector_store.similarity_search(test_query, k=5)
+
+    active_methods: list[str] = ["llm"]
+    active_weights: list[float] = [1.0]
+    if registry.has_models():
+        active_methods.append("cross_encoder")
+        active_weights = [0.6, 0.4]
+
+    print(f"   🎭 Ensemble methods: {active_methods}")
+
+    ensemble_results = ensemble_rerank(
+        llm, registry, test_query, initial_results,
+        method_names=tuple(active_methods),
+        method_weights=tuple(active_weights),
+    )
+    print_scored_results(ensemble_results, label="🎭 Ensemble re-ranking", score_label="ensemble")
+
+
+def benchmark_reranking_methods(
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+        llm: AzureChatOpenAI,
+        queries: list[str],
+        *,
+        results_per_query: int = 5,
+) -> dict[str, BenchmarkResult]:
+    """Measures average latency of each re-ranking method across multiple queries."""
+    method_names = ["baseline", "llm"]
+    if registry.has_models():
+        method_names.append("cross_encoder")
+
+    timings: dict[str, dict[str, float | int]] = {
+        method: {"total_time": 0.0, "queries_processed": 0} for method in method_names
+    }
+
+    for benchmark_query in queries:
+        initial_documents = vector_store.similarity_search(benchmark_query, k=results_per_query * 2)
+
+        for method_name in method_names:
+            start_time = time.time()
+
+            if method_name == "baseline":
+                _final = initial_documents[:results_per_query]
+            elif method_name == "cross_encoder" and registry.has_models():
+                encoder_name = registry.first_model_name()
+                _final = rerank_by_cross_encoder(
+                    registry, benchmark_query, initial_documents,
+                    model_name=encoder_name, max_results=results_per_query,
+                )
+            elif method_name == "llm":
+                _final = rerank_by_llm_relevance(
+                    llm, benchmark_query, initial_documents[:results_per_query],
+                )
+
+            elapsed = time.time() - start_time
+            timings[method_name]["total_time"] += elapsed
+            timings[method_name]["queries_processed"] += 1
+
+    return {
+        method: BenchmarkResult(
+            total_time=data["total_time"],
+            queries_processed=int(data["queries_processed"]),
+        )
+        for method, data in timings.items()
+    }
+
+
+def demonstrate_performance_benchmark(
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+        llm: AzureChatOpenAI,
+) -> None:
+    """
+    Benchmarks latency across re-ranking methods. Baseline (no re-ranking) is
+    near-instant, cross-encoders add moderate latency, and LLM scoring is
+    slowest due to per-document API calls — but often most accurate.
+    """
+    print_section_header("5️⃣  PERFORMANCE VS QUALITY ANALYSIS")
+    print(textwrap.dedent(demonstrate_performance_benchmark.__doc__))
+
+    benchmark_queries = [
+        "Einstein's theories",
+        "Newton's discoveries",
+        "Marie Curie research",
+    ]
+
+    print("   ⏱️ Benchmarking re-ranking methods:")
+    benchmark_results = benchmark_reranking_methods(
+        vector_store, registry, llm, benchmark_queries, results_per_query=3,
     )
 
-    return response.content, final_docs, scores
+    print(f"   {'Method':<15} {'Avg Time (s)':<15} {'Queries':<10}")
+    print("   " + "-" * 45)
+
+    for method_name, result in benchmark_results.items():
+        print(f"   {method_name:<15} {result.average_time:<15.3f} {result.queries_processed:<10}")
 
 
-# 8. Test Re-ranking RAG System
-print("\n8️⃣ Testing re-ranking RAG system:")
+def run_reranking_rag_chain(
+        llm: AzureChatOpenAI,
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+        question: str,
+        *,
+        rerank_method: str = "llm",
+        max_results: int = 4,
+) -> tuple[str, list[Document], list[float]]:
+    """
+    Full RAG cycle with post-retrieval re-ranking: retrieves a broad candidate set,
+    re-ranks with the chosen method, then generates an answer from the top results.
+    """
+    candidate_documents = vector_store.similarity_search(question, k=max_results * 2)
 
-test_questions = [
-    "What are Einstein's most important contributions?",
-    "How did Newton change physics?",
-    "What did Marie Curie discover?"
-]
+    if rerank_method == "cross_encoder" and registry.has_models():
+        encoder_name = registry.first_model_name()
+        reranked = rerank_by_cross_encoder(
+            registry, question, candidate_documents,
+            model_name=encoder_name, max_results=max_results,
+        )
+    elif rerank_method == "llm":
+        reranked = rerank_by_llm_relevance(llm, question, candidate_documents[:max_results + 2])
+        reranked = reranked[:max_results]
+    elif rerank_method == "ensemble":
+        active_methods: list[str] = ["llm"]
+        if registry.has_models():
+            active_methods.append("cross_encoder")
+        reranked = ensemble_rerank(
+            llm, registry, question, candidate_documents[:max_results + 2],
+            method_names=tuple(active_methods),
+        )
+        reranked = reranked[:max_results]
+    else:
+        reranked = [(doc, 1.0) for doc in candidate_documents[:max_results]]
 
-for i, question in enumerate(test_questions, 1):
-    print(f"\n   Q{i}: {question}")
-    print("   " + "-" * 50)
+    final_documents = [doc for doc, _score in reranked]
+    final_scores = [score for _doc, score in reranked]
 
-    try:
-        # Test different re-ranking methods
-        methods_to_test = ['baseline', 'llm']
-        if cross_encoders:
-            methods_to_test.append('cross_encoder')
+    context_parts = [
+        f"Source {source_rank} ({doc.metadata['scientist_name']}): {doc.page_content}"
+        for source_rank, doc in enumerate(final_documents, start=1)
+    ]
+    formatted_context = "\n\n".join(context_parts)
 
-        for method in methods_to_test:
-            answer, sources, scores = reranking_rag_chain(question, method)
+    llm_response = llm.invoke(
+        RERANK_RAG_PROMPT.format(question=question, context=formatted_context),
+    )
 
-            print(f"\n   {method.capitalize()} re-ranking:")
-            print(f"   Answer: {answer}")
-            print(f"   Sources: {[doc.metadata['scientist_name'] for doc in sources]}")
-            if method != 'baseline':
-                print(f"   Scores: {[f'{score:.2f}' for score in scores]}")
-
-    except Exception as e:
-        print(f"   Error: {str(e)}")
-
-# 9. Re-ranking Effectiveness Analysis
-print("\n9️⃣ Re-ranking effectiveness analysis:")
+    return llm_response.content, final_documents, final_scores
 
 
-def analyze_reranking_effectiveness(queries, methods):
-    """Analyze how re-ranking affects result quality."""
-    effectiveness_data = {}
+def demonstrate_reranking_rag(
+        llm: AzureChatOpenAI,
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+) -> None:
+    """
+    Tests the full re-ranking RAG pipeline with multiple methods (baseline, LLM,
+    cross-encoder) side by side. Each question is answered using every available
+    method so you can compare answer quality and source selection.
+    """
+    print_section_header("6️⃣  BUILDING RE-RANKING RAG SYSTEM")
+    print(textwrap.dedent(demonstrate_reranking_rag.__doc__))
 
-    for query in queries:
-        query_data = {}
+    print_section_header("7️⃣  TESTING RE-RANKING RAG SYSTEM")
 
-        # Get baseline results
-        baseline_docs = vector_store.similarity_search(query, k=5)
+    test_questions = [
+        "What are Einstein's most important contributions?",
+        "How did Newton change physics?",
+        "What did Marie Curie discover?",
+    ]
 
-        for method in methods:
-            if method == 'baseline':
-                final_docs = baseline_docs
-                scientists = [doc.metadata['scientist_name'] for doc in final_docs]
+    methods_to_test = ["baseline", "llm"]
+    if registry.has_models():
+        methods_to_test.append("cross_encoder")
 
-            elif method == 'llm':
-                reranked = llm_relevance_scoring(query, baseline_docs, llm)
-                final_docs = [doc for doc, score in reranked]
-                scientists = [doc.metadata['scientist_name'] for doc in final_docs]
+    for question_number, question in enumerate(test_questions, start=1):
+        print(f"\n   Q{question_number}: {question}\n"
+              f"   {'-' * 50}")
 
-            elif method == 'cross_encoder' and cross_encoders:
-                model_name = list(cross_encoders.keys())[0]
-                reranked = cross_encoder_rerank(query, baseline_docs, model_name)
-                final_docs = [doc for doc, score in reranked]
-                scientists = [doc.metadata['scientist_name'] for doc in final_docs]
+        try:
+            for method_name in methods_to_test:
+                answer, source_documents, scores = run_reranking_rag_chain(
+                    llm, vector_store, registry, question, rerank_method=method_name,
+                )
 
+                source_names = [doc.metadata["scientist_name"] for doc in source_documents]
+                score_line = f"\n      Scores: {[f'{score:.2f}' for score in scores]}" if method_name != "baseline" else ""
+                print(textwrap.dedent(f"""
+                      {method_name.capitalize()} re-ranking:
+                      Answer: {answer}
+                      Sources: {source_names}{score_line}"""))
+
+        except Exception as rag_error:
+            print(f"      Error: {rag_error}")
+
+
+def demonstrate_effectiveness_analysis(
+        vector_store: InMemoryVectorStore,
+        registry: CrossEncoderRegistry,
+        llm: AzureChatOpenAI,
+) -> None:
+    """
+    Measures how each re-ranking method affects result diversity (unique scientists
+    in top-5 results). Higher diversity often means the re-ranker is surfacing
+    relevant content from across the knowledge base instead of clustering.
+    """
+    print_section_header("8️⃣  RE-RANKING EFFECTIVENESS ANALYSIS")
+    print(textwrap.dedent(demonstrate_effectiveness_analysis.__doc__))
+
+    analysis_queries = ["Einstein relativity", "Newton gravity", "Curie radioactivity"]
+    analysis_methods = ["baseline", "llm"]
+    if registry.has_models():
+        analysis_methods.append("cross_encoder")
+
+    effectiveness_table: dict[str, dict[str, EffectivenessStats]] = {}
+
+    for analysis_query in analysis_queries:
+        baseline_documents = vector_store.similarity_search(analysis_query, k=5)
+        method_stats: dict[str, EffectivenessStats] = {}
+
+        for method_name in analysis_methods:
+            if method_name == "baseline":
+                final_documents = baseline_documents
+            elif method_name == "llm":
+                reranked = rerank_by_llm_relevance(llm, analysis_query, baseline_documents)
+                final_documents = [doc for doc, _score in reranked]
+            elif method_name == "cross_encoder" and registry.has_models():
+                encoder_name = registry.first_model_name()
+                reranked = rerank_by_cross_encoder(
+                    registry, analysis_query, baseline_documents, model_name=encoder_name,
+                )
+                final_documents = [doc for doc, _score in reranked]
             else:
                 continue
 
-            # Analyze diversity and relevance
-            unique_scientists = len(set(scientists))
-            total_docs = len(final_docs)
+            scientist_names = [doc.metadata["scientist_name"] for doc in final_documents]
+            method_stats[method_name] = EffectivenessStats(
+                unique_scientist_count=len(set(scientist_names)),
+                total_document_count=len(final_documents),
+            )
 
-            query_data[method] = {
-                'unique_scientists': unique_scientists,
-                'total_docs': total_docs,
-                'diversity_ratio': unique_scientists / total_docs if total_docs > 0 else 0
-            }
+        effectiveness_table[analysis_query] = method_stats
 
-        effectiveness_data[query] = query_data
+    print(f"\n   📊 Re-ranking effectiveness analysis:")
+    print(f"   {'Query':<20} {'Method':<15} {'Unique Sci.':<12} {'Diversity':<12}")
+    print("   " + "-" * 65)
 
-    return effectiveness_data
+    for analysis_query, methods_data in effectiveness_table.items():
+        for method_name, stats in methods_data.items():
+            print(
+                f"   {analysis_query:<20} {method_name:<15} "
+                f"{stats.unique_scientist_count:<12} {stats.diversity_ratio:<12.2f}"
+            )
+
+    available_methods = ["baseline", "llm"]
+    if registry.has_models():
+        available_methods.extend(["cross_encoder", "ensemble"])
+
+    print(textwrap.dedent(f"""\
+
+        💡 Re-ranking RAG system ready!
+        🎯 Use run_reranking_rag_chain() for optimized retrieval
+        🔄 Available methods: {', '.join(available_methods)}"""))
 
 
-# Analyze effectiveness
-analysis_queries = ["Einstein relativity", "Newton gravity", "Curie radioactivity"]
-analysis_methods = ['baseline', 'llm']
-if cross_encoders:
-    analysis_methods.append('cross_encoder')
+if __name__ == "__main__":
+    load_dotenv(override=True)
 
-effectiveness = analyze_reranking_effectiveness(analysis_queries, analysis_methods)
+    print("🎯 RE-RANKING DEMONSTRATION\n"
+          "=" * 50)
 
-print(f"\n   📊 Re-ranking effectiveness analysis:")
-print(f"   {'Query':<20} {'Method':<15} {'Unique Sci.':<12} {'Diversity':<12}")
-print("   " + "-" * 65)
+    _chunks, reranking_vector_store = load_and_index_scientist_chunks()
+    cross_encoder_registry = load_cross_encoder_models()
 
-for query, methods_data in effectiveness.items():
-    for method, data in methods_data.items():
-        unique_count = data['unique_scientists']
-        diversity = data['diversity_ratio']
-        print(f"   {query:<20} {method:<15} {unique_count:<12} {diversity:<12.2f}")
+    azure_chat_llm = AzureChatOpenAI(model="gpt-5-nano")
 
-print(f"\n💡 Re-ranking RAG system ready!")
-print(f"🎯 Use reranking_rag_chain('Your question', 'method') for optimized retrieval")
-
-available_methods = ['baseline', 'llm']
-if cross_encoders:
-    available_methods.extend(['cross_encoder', 'ensemble'])
-
-print(f"🔄 Available methods: {', '.join(available_methods)}")
+    demonstrate_individual_reranking(reranking_vector_store, cross_encoder_registry, azure_chat_llm)
+    demonstrate_ensemble_reranking(reranking_vector_store, cross_encoder_registry, azure_chat_llm)
+    demonstrate_performance_benchmark(reranking_vector_store, cross_encoder_registry, azure_chat_llm)
+    demonstrate_reranking_rag(azure_chat_llm, reranking_vector_store, cross_encoder_registry)
+    demonstrate_effectiveness_analysis(reranking_vector_store, cross_encoder_registry, azure_chat_llm)

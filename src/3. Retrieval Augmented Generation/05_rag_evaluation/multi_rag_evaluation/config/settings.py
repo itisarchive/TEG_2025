@@ -1,48 +1,55 @@
-# Model settings
-EXPERT_MODEL = "gpt-5"
-EVALUATOR_MODEL = "gpt-4.1"
-RAG_MODEL = "gpt-4o-mini"
+"""
+⚙️ Configuration for the Multi-RAG Comparative Evaluation System
+================================================================
 
-# Chunking settings (from course modules)
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
+All tuneable parameters — model names, chunking strategy, retrieval settings,
+and evaluation questions — are collected in frozen dataclasses so that every
+pipeline stage receives an immutable, self-documenting configuration object.
+"""
 
-# Retrieval settings
-TOP_K = 3
+from dataclasses import dataclass, field
 
-# BM25 specific (for hybrid search)
-BM25_K1 = 1.5
-BM25_B = 0.75
 
-# Reranking specific
-RERANK_TOP_K = 6  # Retrieve more initially
-FINAL_TOP_K = 3   # Return top 3 after reranking
+@dataclass(frozen=True)
+class ModelConfig:
+    expert_model: str = "gpt-5"
+    evaluator_model: str = "gpt-4.1"
+    rag_chat_model: str = "gpt-4o-mini"
+    embedding_model: str = "text-embedding-3-small"
 
-# Query expansion
-MAX_QUERY_VARIATIONS = 3
 
-# Evaluation questions
-EVAL_QUESTIONS = [
-    "What did Marie Curie win Nobel Prizes for?",
-    "What is Einstein's theory of relativity about?",
-    "What are Newton's three laws of motion?",
-    "What did Charles Darwin discover?",
-    "What was Ada Lovelace's contribution to computing?"
-]
+@dataclass(frozen=True)
+class ChunkingConfig:
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
 
-# Convert to dict for easy access
-def get_config():
-    return {
-        "EXPERT_MODEL": EXPERT_MODEL,
-        "EVALUATOR_MODEL": EVALUATOR_MODEL,
-        "RAG_MODEL": RAG_MODEL,
-        "CHUNK_SIZE": CHUNK_SIZE,
-        "CHUNK_OVERLAP": CHUNK_OVERLAP,
-        "TOP_K": TOP_K,
-        "BM25_K1": BM25_K1,
-        "BM25_B": BM25_B,
-        "RERANK_TOP_K": RERANK_TOP_K,
-        "FINAL_TOP_K": FINAL_TOP_K,
-        "MAX_QUERY_VARIATIONS": MAX_QUERY_VARIATIONS,
-        "EVAL_QUESTIONS": EVAL_QUESTIONS
-    }
+
+@dataclass(frozen=True)
+class RetrievalConfig:
+    top_k: int = 3
+    bm25_weight: float = 0.3
+    rerank_initial_top_k: int = 6
+    rerank_final_top_k: int = 3
+    max_query_variations: int = 3
+
+
+@dataclass(frozen=True)
+class EvaluationQuestions:
+    questions: tuple[str, ...] = (
+        "What did Marie Curie win Nobel Prizes for?",
+        "What is Einstein's theory of relativity about?",
+        "What are Newton's three laws of motion?",
+        "What did Charles Darwin discover?",
+        "What was Ada Lovelace's contribution to computing?",
+    )
+
+
+@dataclass(frozen=True)
+class PipelineSettings:
+    models: ModelConfig = field(default_factory=ModelConfig)
+    chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    evaluation_questions: EvaluationQuestions = field(default_factory=EvaluationQuestions)
+
+
+SETTINGS = PipelineSettings()

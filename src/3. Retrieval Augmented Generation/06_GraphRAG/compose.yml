@@ -2,9 +2,10 @@ services:
   neo4j:
     image: neo4j:latest
     container_name: neo4j-graphrag
+    restart: unless-stopped
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "7474:7474"   # Neo4j Browser (HTTP)
+      - "7687:7687"   # Bolt protocol
     environment:
       - NEO4J_AUTH=neo4j/password123
       - NEO4J_PLUGINS=["apoc"]
@@ -13,7 +14,6 @@ services:
       - neo4j-logs:/logs
       - neo4j-import:/var/lib/neo4j/import
       - neo4j-plugins:/plugins
-    restart: unless-stopped
 
 volumes:
   neo4j-data:

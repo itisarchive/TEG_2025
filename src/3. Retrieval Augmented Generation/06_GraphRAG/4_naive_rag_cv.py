@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
-Naive RAG Baseline for CV Data.
+Naive RAG Baseline for CV Data
+===============================
 
 Traditional vector-based RAG system using ChromaDB for similarity search.
 This serves as a baseline comparison against GraphRAG to demonstrate
-the limitations of naive RAG for structured queries.
-"""
+the limitations of naive RAG for structured, relationship-heavy queries.
 
-from __future__ import annotations
+🎯 What You'll Learn:
+- How a traditional (naive) RAG pipeline works end-to-end
+- Loading PDFs → chunking → embedding → vector store → retrieval → LLM answer
+- Why pure vector similarity struggles with structured / multi-hop questions
+
+🔧 Prerequisites:
+    - Azure OpenAI credentials in environment / .env
+    - Generated CV PDFs (see 1_generate_data.py)
+"""
 
 import json
 import logging
-import os
+import textwrap
 import time
 import tomllib
 from dataclasses import dataclass
@@ -25,333 +33,432 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ContextChunkInfo(TypedDict):
+class RetrievedChunkInfo(TypedDict):
     chunk_index: int
     source_file: str
     person_name: str
     content_preview: str
 
 
-class QueryResult(TypedDict):
+class NaiveRagQueryResult(TypedDict):
     query: str
     answer: str
     source_type: str
-    execution_time: float
+    execution_time_seconds: float
     num_chunks_retrieved: int
-    context_info: list[ContextChunkInfo]
+    retrieved_chunks_info: list[RetrievedChunkInfo]
     success: bool
     error: str | None
 
 
 @dataclass(frozen=True, slots=True)
-class RagPaths:
-    programmers_dir: Path
-    vector_db_dir: Path
-    results_dir: Path
+class CvDirectoryPaths:
+    cv_pdf_directory: Path
+    vector_store_directory: Path
+    results_directory: Path
 
 
 @dataclass(frozen=True, slots=True)
-class RagModels:
-    embedding_model: str
-    chat_model: str
+class AzureModelNames:
+    embedding_model_name: str
+    chat_model_name: str
 
 
 @dataclass(frozen=True, slots=True)
-class Chunking:
+class ChunkingParameters:
     chunk_size: int
     chunk_overlap: int
 
 
-class NaiveCvRag:
-    """Traditional RAG system using vector similarity search for CV PDFs."""
+def print_section_header(title: str) -> None:
+    separator = "=" * 60
+    print(f"\n{separator}\n{title}\n{separator}")
 
-    _DEFAULT_EMBEDDING_MODEL: Final[str] = "text-embedding-3-small"
-    _DEFAULT_CHAT_MODEL: Final[str] = "gpt-4o"
-    _DEFAULT_VECTOR_DB_DIR: Final[Path] = Path("./chroma_naive_rag_cv")
-    _DEFAULT_RESULTS_DIR: Final[Path] = Path("results")
+
+class NaiveCvRag:
+    """
+    Traditional RAG system that answers CV-related questions using vector similarity search.
+
+    Pipeline: PDF loading → recursive text chunking → Azure OpenAI embeddings
+    → ChromaDB vector store → similarity retrieval → LLM-generated answer.
+
+    This approach works well for simple keyword / semantic lookups but struggles
+    with multi-hop reasoning, aggregation, and relationship-based queries —
+    exactly the gaps that GraphRAG is designed to fill.
+    """
+
+    EMBEDDING_MODEL_NAME: Final[str] = "text-embedding-3-small"
+    CHAT_MODEL_NAME: Final[str] = "gpt-4.1"
+    VECTOR_STORE_DIR: Final[Path] = Path("./chroma_naive_rag_cv")
+    RESULTS_DIR: Final[Path] = Path("results")
 
     def __init__(self, config_path: str | Path = "utils/config.toml") -> None:
-        self._config = self._load_config(Path(config_path))
-        self._paths = self._build_paths(self._config)
+        parsed_config = self._load_config(Path(config_path))
+        self._directory_paths = self._build_directory_paths(parsed_config)
 
-        self._models = RagModels(
-            embedding_model=self._DEFAULT_EMBEDDING_MODEL,
-            chat_model=self._DEFAULT_CHAT_MODEL,
+        self._model_names = AzureModelNames(
+            embedding_model_name=self.EMBEDDING_MODEL_NAME,
+            chat_model_name=self.CHAT_MODEL_NAME,
         )
-        self._chunking = Chunking(chunk_size=1000, chunk_overlap=200)
+        self._chunking_params = ChunkingParameters(chunk_size=1000, chunk_overlap=200)
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise EnvironmentError("OPENAI_API_KEY is not set.")
+        self._azure_embeddings = AzureOpenAIEmbeddings(
+            model=self._model_names.embedding_model_name,
+        )
+        self._azure_chat_llm = AzureChatOpenAI(
+            model=self._model_names.chat_model_name,
+            temperature=0,
+        )
 
-        self._embeddings = OpenAIEmbeddings(model=self._models.embedding_model, api_key=api_key)
-        self._llm = ChatOpenAI(model=self._models.chat_model, temperature=0, api_key=api_key)
-
-        self._splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self._chunking.chunk_size,
-            chunk_overlap=self._chunking.chunk_overlap,
+        self._text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self._chunking_params.chunk_size,
+            chunk_overlap=self._chunking_params.chunk_overlap,
             length_function=len,
             separators=["\n\n", "\n", " ", ""],
         )
 
-        self._paths.results_dir.mkdir(parents=True, exist_ok=True)
+        self._directory_paths.results_directory.mkdir(parents=True, exist_ok=True)
 
         self._vectorstore: Chroma | None = None
-        self._retriever = None
+        self._similarity_retriever = None
         self._rag_chain = None
 
-        LOGGER.info("Naive CV RAG initialized")
+        LOGGER.info("NaiveCvRag initialized")
 
-    def create_vector_store(self, *, force_recreate: bool = False) -> None:
-        """Create or load the persistent vector store."""
-        if self._paths.vector_db_dir.exists() and not force_recreate:
+    def create_or_load_vector_store(self, *, force_recreate: bool = False) -> None:
+        """Load an existing ChromaDB vector store or create a new one from CV PDFs."""
+        if self._directory_paths.vector_store_directory.exists() and not force_recreate:
             self._vectorstore = Chroma(
-                persist_directory=str(self._paths.vector_db_dir),
-                embedding_function=self._embeddings,
+                persist_directory=str(self._directory_paths.vector_store_directory),
+                embedding_function=self._azure_embeddings,
             )
-            LOGGER.info("Vector store loaded from %s", self._paths.vector_db_dir)
+            LOGGER.info(
+                "Loaded existing vector store from %s",
+                self._directory_paths.vector_store_directory,
+            )
             return
 
-        documents = self._load_cv_documents()
-        chunks = self._splitter.split_documents(documents)
+        cv_documents = self._load_all_cv_documents()
+        chunked_documents = self._text_splitter.split_documents(cv_documents)
 
         self._vectorstore = Chroma.from_documents(
-            documents=chunks,
-            embedding=self._embeddings,
-            persist_directory=str(self._paths.vector_db_dir),
+            documents=chunked_documents,
+            embedding=self._azure_embeddings,
+            persist_directory=str(self._directory_paths.vector_store_directory),
         )
-        LOGGER.info("Vector store created at %s", self._paths.vector_db_dir)
+        LOGGER.info(
+            "Created new vector store at %s",
+            self._directory_paths.vector_store_directory,
+        )
 
-    def setup_rag_chain(self, *, k: int = 5) -> None:
-        """Configure the retriever and RAG chain."""
+    def build_rag_chain(self, *, retrieval_top_k: int = 5) -> None:
+        """
+        Build the retrieval-augmented generation chain.
+
+        The chain retrieves the top-k most similar chunks from the vector store,
+        injects them as context into a system prompt, and passes the user question
+        to an Azure Chat LLM for final answer generation.
+        """
         vectorstore = self._require_vectorstore()
 
-        self._retriever = vectorstore.as_retriever(
+        self._similarity_retriever = vectorstore.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": k},
+            search_kwargs={"k": retrieval_top_k},
         )
 
-        prompt = ChatPromptTemplate.from_messages(
+        hr_assistant_prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    "You are an HR assistant helping with CV analysis. Use the provided context from CVs to answer questions accurately.\n\n"
-                    "IMPORTANT INSTRUCTIONS:\n"
-                    "- Base your answers ONLY on the information provided in the context\n"
-                    "- If you cannot determine something from the context, say so clearly\n"
-                    "- If the context is incomplete for a full answer, acknowledge this limitation\n\n"
-                    "Context from CVs:\n"
-                    "{context}",
+                    textwrap.dedent("""\
+                        You are an HR assistant helping with CV analysis.
+                        Use the provided context from CVs to answer questions accurately.
+
+                        IMPORTANT INSTRUCTIONS:
+                        - Base your answers ONLY on the information provided in the context
+                        - If you cannot determine something from the context, say so clearly
+                        - If the context is incomplete for a full answer, acknowledge this limitation
+
+                        Context from CVs:
+                        {context}"""),
                 ),
                 ("human", "{question}"),
             ]
         )
 
         self._rag_chain = (
-                {"context": self._retriever | self._format_docs, "question": RunnablePassthrough()}
-                | prompt
-                | self._llm
+                {
+                    "context": self._similarity_retriever | self._join_document_contents,
+                    "question": RunnablePassthrough(),
+                }
+                | hr_assistant_prompt
+                | self._azure_chat_llm
                 | StrOutputParser()
         )
 
-        LOGGER.info("RAG chain configured")
+        LOGGER.info("RAG chain built with top_k=%d", retrieval_top_k)
 
-    def initialize(self, *, force_recreate_vectorstore: bool = False, k: int = 5) -> None:
-        """Initialize the vector store and RAG chain."""
-        self.create_vector_store(force_recreate=force_recreate_vectorstore)
-        self.setup_rag_chain(k=k)
+    def initialize(
+            self,
+            *,
+            force_recreate_vectorstore: bool = False,
+            retrieval_top_k: int = 5,
+    ) -> None:
+        """Create / load the vector store, then build the RAG chain — ready to query."""
+        self.create_or_load_vector_store(force_recreate=force_recreate_vectorstore)
+        self.build_rag_chain(retrieval_top_k=retrieval_top_k)
 
-    def query(self, question: str) -> QueryResult:
-        """Answer a question using the configured RAG chain."""
-        start = time.perf_counter()
+    def query(self, question: str) -> dict[str, object]:
+        """Backward-compatible alias for answer_question, expected by SystemComparator."""
+        full_result = self.answer_question(question)
+        return {
+            **full_result,
+            "execution_time": full_result["execution_time_seconds"],
+        }
+
+    def answer_question(self, question: str) -> NaiveRagQueryResult:
+        """
+        Run one question through the full naive-RAG pipeline and return a structured result.
+
+        Steps: retrieve similar chunks → format context → LLM generates answer.
+        """
+        start_time = time.perf_counter()
         try:
-            chain = self._require_rag_chain()
+            rag_chain = self._require_rag_chain()
             retriever = self._require_retriever()
 
-            relevant_docs: list[Document] = retriever.invoke(question)
-            answer: str = chain.invoke(question)
-            elapsed = time.perf_counter() - start
+            retrieved_documents: list[Document] = retriever.invoke(question)
+            generated_answer: str = rag_chain.invoke(question)
+            elapsed_seconds = time.perf_counter() - start_time
 
-            return QueryResult(
+            return NaiveRagQueryResult(
                 query=question,
-                answer=answer,
+                answer=generated_answer,
                 source_type="naive_rag",
-                execution_time=elapsed,
-                num_chunks_retrieved=len(relevant_docs),
-                context_info=self._build_context_info(relevant_docs),
+                execution_time_seconds=elapsed_seconds,
+                num_chunks_retrieved=len(retrieved_documents),
+                retrieved_chunks_info=self._extract_chunks_info(retrieved_documents),
                 success=True,
                 error=None,
             )
-        except Exception as exc:
-            elapsed = time.perf_counter() - start
+        except (ValueError, RuntimeError) as query_error:
+            elapsed_seconds = time.perf_counter() - start_time
             LOGGER.exception("Query failed")
-            return QueryResult(
+            return NaiveRagQueryResult(
                 query=question,
-                answer=f"Error processing query: {exc}",
+                answer=f"Error processing query: {query_error}",
                 source_type="naive_rag",
-                execution_time=elapsed,
+                execution_time_seconds=elapsed_seconds,
                 num_chunks_retrieved=0,
-                context_info=[],
+                retrieved_chunks_info=[],
                 success=False,
-                error=str(exc),
+                error=str(query_error),
             )
 
-    def get_database_stats(self) -> dict[str, object]:
+    def get_vector_store_stats(self) -> dict[str, object]:
         """Return basic statistics about the current vector database."""
-        vectorstore = self._vectorstore
-        if vectorstore is None:
+        if self._vectorstore is None:
             return {"error": "Vector store not initialized"}
 
         try:
-            total_chunks = self._count_chunks(vectorstore)
-            sample_source_files = self._sample_source_files(vectorstore, limit=10)
+            total_chunks = self._count_stored_chunks(self._vectorstore)
+            sample_files = self._sample_source_file_names(
+                self._vectorstore, max_samples=10,
+            )
             return {
                 "total_chunks": total_chunks,
-                "sample_source_files": sample_source_files,
-                "embedding_model": self._models.embedding_model,
-                "chunk_size": self._chunking.chunk_size,
-                "chunk_overlap": self._chunking.chunk_overlap,
+                "sample_source_files": sample_files,
+                "embedding_model": self._model_names.embedding_model_name,
+                "chunk_size": self._chunking_params.chunk_size,
+                "chunk_overlap": self._chunking_params.chunk_overlap,
             }
-        except Exception as exc:
-            return {"error": f"Could not get stats: {exc}"}
+        except RuntimeError as stats_error:
+            return {"error": f"Could not get stats: {stats_error}"}
 
-    def save_results(self, results: list[QueryResult], *, output_file: Path) -> None:
-        """Persist query results to a JSON file."""
+    def save_results_to_json(
+            self,
+            query_results: list[NaiveRagQueryResult],
+            *,
+            output_file_path: Path,
+    ) -> None:
+        """Persist query results together with metadata to a JSON file."""
         payload = {
             "test_metadata": {
                 "system_type": "naive_rag",
-                "test_queries": len(results),
-                "database_stats": self.get_database_stats(),
+                "test_queries": len(query_results),
+                "database_stats": self.get_vector_store_stats(),
             },
-            "results": results,
+            "results": query_results,
         }
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file_path.write_text(
+            json.dumps(payload, indent=2), encoding="utf-8",
+        )
 
-    def _load_cv_documents(self) -> list[Document]:
-        cv_files = sorted(self._paths.programmers_dir.glob("*.pdf"))
-        if not cv_files:
-            raise FileNotFoundError(f"No PDF files found in {self._paths.programmers_dir}")
+    def _load_all_cv_documents(self) -> list[Document]:
+        """Load every CV PDF from the configured directory and enrich metadata."""
+        pdf_file_paths = sorted(
+            self._directory_paths.cv_pdf_directory.glob("*.pdf"),
+        )
+        if not pdf_file_paths:
+            raise FileNotFoundError(
+                f"No PDF files found in {self._directory_paths.cv_pdf_directory}"
+            )
 
-        documents: list[Document] = []
-        for cv_file in cv_files:
+        all_loaded_pages: list[Document] = []
+        for pdf_path in pdf_file_paths:
             try:
-                loaded = PyPDFLoader(str(cv_file)).load()
-                for doc in loaded:
-                    doc.metadata.update(
+                loaded_pages = PyPDFLoader(str(pdf_path)).load()
+                for page_document in loaded_pages:
+                    page_document.metadata.update(
                         {
-                            "source_file": cv_file.name,
+                            "source_file": pdf_path.name,
                             "document_type": "cv",
-                            "person_name": cv_file.stem,
+                            "person_name": pdf_path.stem,
                         }
                     )
-                documents.extend(loaded)
-            except Exception:
-                LOGGER.exception("Could not load %s", cv_file)
+                all_loaded_pages.extend(loaded_pages)
+            except (OSError, ValueError):
+                LOGGER.exception("Could not load %s", pdf_path)
 
-        if not documents:
-            raise RuntimeError(f"All PDF loads failed in {self._paths.programmers_dir}")
+        if not all_loaded_pages:
+            raise RuntimeError(
+                f"All PDF loads failed in {self._directory_paths.cv_pdf_directory}"
+            )
 
-        LOGGER.info("Loaded %d pages from %d CV files", len(documents), len(cv_files))
-        return documents
+        LOGGER.info(
+            "Loaded %d pages from %d CV files",
+            len(all_loaded_pages),
+            len(pdf_file_paths),
+        )
+        return all_loaded_pages
 
     @staticmethod
-    def _format_docs(docs: list[Document]) -> str:
-        return "\n\n".join(doc.page_content for doc in docs)
+    def _join_document_contents(documents: list[Document]) -> str:
+        return "\n\n".join(doc.page_content for doc in documents)
 
     @staticmethod
-    def _build_context_info(docs: list[Document]) -> list[ContextChunkInfo]:
-        items: list[ContextChunkInfo] = []
-        for idx, doc in enumerate(docs):
-            text = doc.page_content
-            items.append(
-                ContextChunkInfo(
-                    chunk_index=idx,
-                    source_file=str(doc.metadata.get("source_file", "unknown")),
-                    person_name=str(doc.metadata.get("person_name", "unknown")),
-                    content_preview=text[:200] + "..." if len(text) > 200 else text,
+    def _extract_chunks_info(documents: list[Document]) -> list[RetrievedChunkInfo]:
+        chunks_info: list[RetrievedChunkInfo] = []
+        for chunk_index, document in enumerate(documents):
+            content_text = document.page_content
+            chunks_info.append(
+                RetrievedChunkInfo(
+                    chunk_index=chunk_index,
+                    source_file=str(document.metadata.get("source_file", "unknown")),
+                    person_name=str(document.metadata.get("person_name", "unknown")),
+                    content_preview=(
+                        content_text[:200] + "..."
+                        if len(content_text) > 200
+                        else content_text
+                    ),
                 )
             )
-        return items
+        return chunks_info
 
     def _require_vectorstore(self) -> Chroma:
         if self._vectorstore is None:
-            raise RuntimeError("Vector store not initialized. Call create_vector_store() first.")
+            raise RuntimeError(
+                "Vector store not initialized. Call create_or_load_vector_store() first."
+            )
         return self._vectorstore
 
     def _require_retriever(self):
-        if self._retriever is None:
-            raise RuntimeError("Retriever not initialized. Call setup_rag_chain() first.")
-        return self._retriever
+        if self._similarity_retriever is None:
+            raise RuntimeError(
+                "Retriever not initialized. Call build_rag_chain() first."
+            )
+        return self._similarity_retriever
 
     def _require_rag_chain(self):
         if self._rag_chain is None:
-            raise RuntimeError("RAG chain not initialized. Call setup_rag_chain() first.")
+            raise RuntimeError(
+                "RAG chain not initialized. Call build_rag_chain() first."
+            )
         return self._rag_chain
 
     @staticmethod
-    def _count_chunks(vectorstore: Chroma) -> int:
+    def _count_stored_chunks(vectorstore: Chroma) -> int:
         collection = getattr(vectorstore, "_collection", None)
         if collection is None:
             raise RuntimeError("Chroma collection is not available.")
         return int(collection.count())
 
     @staticmethod
-    def _sample_source_files(vectorstore: Chroma, *, limit: int) -> list[str]:
+    def _sample_source_file_names(
+            vectorstore: Chroma, *, max_samples: int,
+    ) -> list[str]:
         collection = getattr(vectorstore, "_collection", None)
         if collection is None:
             return []
 
         try:
-            result = collection.get(include=["metadatas"], limit=limit)
-            metadatas = result.get("metadatas") or []
-            source_files = {str(md.get("source_file", "unknown")) for md in metadatas if isinstance(md, dict)}
-            return sorted(source_files)[:limit]
-        except Exception:
+            collection_data = collection.get(
+                include=["metadatas"], limit=max_samples,
+            )
+            metadata_list = collection_data.get("metadatas") or []
+            unique_source_files = {
+                str(metadata.get("source_file", "unknown"))
+                for metadata in metadata_list
+                if isinstance(metadata, dict)
+            }
+            return sorted(unique_source_files)[:max_samples]
+        except (KeyError, AttributeError):
             return []
 
     @staticmethod
     def _load_config(config_path: Path) -> dict[str, object]:
         if not config_path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+            raise FileNotFoundError(
+                f"Configuration file not found: {config_path}"
+            )
         return tomllib.loads(config_path.read_text(encoding="utf-8"))
 
     @classmethod
-    def _build_paths(cls, config: dict[str, object]) -> RagPaths:
-        output = config.get("output")
-        if not isinstance(output, dict):
+    def _build_directory_paths(cls, parsed_config: dict[str, object]) -> CvDirectoryPaths:
+        output_section = parsed_config.get("output")
+        if not isinstance(output_section, dict):
             raise ValueError("Invalid config: expected [output] section")
 
-        programmers_dir = output.get("programmers_dir")
-        if not isinstance(programmers_dir, str) or not programmers_dir.strip():
-            raise ValueError("Invalid config: output.programmers_dir must be a non-empty string")
+        cv_pdf_dir_value = output_section.get("programmers_dir")
+        if not isinstance(cv_pdf_dir_value, str) or not cv_pdf_dir_value.strip():
+            raise ValueError(
+                "Invalid config: output.programmers_dir must be a non-empty string"
+            )
 
-        return RagPaths(
-            programmers_dir=Path(programmers_dir),
-            vector_db_dir=cls._DEFAULT_VECTOR_DB_DIR,
-            results_dir=cls._DEFAULT_RESULTS_DIR,
+        return CvDirectoryPaths(
+            cv_pdf_directory=Path(cv_pdf_dir_value),
+            vector_store_directory=cls.VECTOR_STORE_DIR,
+            results_directory=cls.RESULTS_DIR,
         )
 
 
 def run_smoke_test() -> None:
-    print("Testing Naive CV RAG")
-    print("=" * 30)
+    """
+    Smoke test that builds a naive-RAG pipeline over CV PDFs and runs
+    a handful of typical HR queries to verify the system works end-to-end.
+    """
+    print_section_header("Naive RAG Smoke Test")
 
-    rag = NaiveCvRag()
-    rag.initialize()
+    naive_rag = NaiveCvRag()
+    naive_rag.initialize()
 
-    stats = rag.get_database_stats()
-    print("\nDatabase Statistics:")
-    print(f"Total chunks: {stats.get('total_chunks', 'unknown')}")
-    print(f"Sample files: {', '.join(list(stats.get('sample_source_files', []))[:3])}")
+    database_stats = naive_rag.get_vector_store_stats()
+    sample_source_files: list[str] = database_stats.get("sample_source_files", [])  # type: ignore[assignment]
+    sample_files_preview = ", ".join(sample_source_files[:3])
+    print(textwrap.dedent(f"""\
 
-    queries = [
+        Database Statistics:
+        Total chunks: {database_stats.get('total_chunks', 'unknown')}
+        Sample files: {sample_files_preview}"""))
+
+    test_queries = [
         "How many people have Python skills?",
         "List people with AWS certifications",
         "What is the most common programming language?",
@@ -359,31 +466,34 @@ def run_smoke_test() -> None:
         "Find people with both React and Node.js skills",
     ]
 
-    results: list[QueryResult] = []
-    for i, q in enumerate(queries, start=1):
-        print(f"\n[{i}/{len(queries)}] Query: {q}")
-        print("-" * 40)
-        result = rag.query(q)
-        results.append(result)
+    collected_results: list[NaiveRagQueryResult] = []
+    for query_number, query_text in enumerate(test_queries, start=1):
+        print(f"\n[{query_number}/{len(test_queries)}] Query: {query_text}\n"
+              f"{'-' * 40}")
 
-        if result["success"]:
-            print(f"Answer: {result['answer']}")
-            print(f"Execution time: {result['execution_time']:.2f}s")
-            print(f"Chunks used: {result['num_chunks_retrieved']}")
+        single_result = naive_rag.answer_question(query_text)
+        collected_results.append(single_result)
+
+        if single_result["success"]:
+            print(textwrap.dedent(f"""\
+                Answer: {single_result['answer']}
+                Execution time: {single_result['execution_time_seconds']:.2f}s
+                Chunks used: {single_result['num_chunks_retrieved']}"""))
         else:
-            print(f"Error: {result['answer']}")
+            print(f"Error: {single_result['answer']}")
 
-    output_file = Path("results") / "naive_rag_test_results.json"
-    rag.save_results(results, output_file=output_file)
-    print(f"\nSaved test results to: {output_file}")
+    results_output_path = Path("results") / "naive_rag_test_results.json"
+    naive_rag.save_results_to_json(
+        collected_results, output_file_path=results_output_path,
+    )
+    print(f"\nSaved test results to: {results_output_path}")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     load_dotenv(override=True)
 
-    print("Naive RAG Baseline System for CV Data")
-    print("=" * 40)
+    print_section_header("Naive RAG Baseline System for CV Data")
     run_smoke_test()
 
 

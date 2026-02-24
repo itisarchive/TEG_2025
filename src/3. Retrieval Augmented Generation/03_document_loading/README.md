@@ -1,140 +1,163 @@
-# Module 3: Document Loading
+# Module 3: Document Loading for RAG Systems
 
-## Learning Objectives
-- Master different document loading strategies for RAG systems
-- Compare text, PDF, and web-based content loading approaches
-- Understand content cleaning and preprocessing techniques
-- Build unified knowledge bases from multiple file types
-- Learn best practices for production document ingestion
+This module teaches how to ingest content from different source formats —
+plain text files, PDFs, and live web pages — and feed it into a
+Retrieval-Augmented Generation pipeline using **LangChain** and **Azure OpenAI**.
 
-## Prerequisites
-- Completed Module 2 (Vector Stores)
-- Understanding of document chunking and embeddings
-- OpenAI API key configured
+## 🎯 Learning Objectives
 
-## Scripts in This Module
+By completing this module, you will:
 
-### 1. `1_text_files.py` - Text File Loading Fundamentals
-Master the basics of loading text documents:
-- Single file vs. multiple file loading patterns
-- Directory-based loading with glob patterns
-- Content metadata management
-- Chunk distribution analysis across documents
+- Master text, PDF, and web-based document loading strategies
+- Understand trade-offs between loading approaches (single file, directory, glob patterns)
+- Convert text files to PDF and extract content back with PyPDFLoader
+- Scrape and clean web pages with WebBaseLoader and BeautifulSoup
+- Split documents into overlapping chunks for vector search
+- Build complete RAG chains over each source type
+- Apply best practices for production document ingestion
 
-**Key learning:** Different approaches to text file ingestion and their trade-offs
+## 📚 Module Content
 
-### 2. `2_pdf_loading.py` - PDF Document Processing
-Handle PDF documents in RAG systems:
-- PDF creation from text sources (for demonstration)
-- PDF text extraction using PyPDFLoader
-- Page-level metadata preservation
-- Comparison of PDF vs. text loading results
+### 1. Text File Loading (`1_text_files.py`)
 
-**Key learning:** PDF-specific considerations and processing techniques
+**📄 Four strategies for loading text into a RAG pipeline**
 
-### 3. `3_web_sources.py` - Web Content Integration
-Load content from web sources:
-- URL accessibility checking with proper headers
-- Web scraping with WebBaseLoader
-- Simplified content cleaning using BeautifulSoup
-- BeautifulSoup vs basic text processing comparison
-- Rate limiting and error handling
+A step-by-step script covering:
 
-**Key learning:** Web content integration with effective cleaning strategies
+- **Single File Loading** — `TextLoader` for one document at a time
+- **Multiple Specific Files** — iterating over a curated list of paths
+- **Directory Loading** — `DirectoryLoader` for automatic file discovery
+- **Glob Pattern Filtering** — selective discovery with `*.txt` patterns
+- **Text Splitting** — `RecursiveCharacterTextSplitter` with chunk distribution analysis
+- **RAG Chain** — end-to-end question-answering over scientist biographies
 
-**Note:** Only 3 scripts are currently implemented in this module.
+Key comparison of loading methods:
 
-## Key Concepts
+| Method                  | Advantages                       | Disadvantages                  |
+|-------------------------|----------------------------------|--------------------------------|
+| Single File             | Precise control, fast            | Manual, doesn't scale          |
+| Multiple Specific Files | Selective, curated               | Requires file list maintenance |
+| Directory Loading       | Automatic discovery, scales well | May include unwanted files     |
+| Pattern-Based Loading   | Flexible filtering, best of both | —                              |
 
-- **Document Loaders**: Specialized classes for different file types and sources
-- **Content Cleaning**: Removing artifacts and normalizing text from various sources
-- **Metadata Management**: Tracking source information and document properties
-- **Source Provenance**: Maintaining information about where content originated
-- **Format-Specific Processing**: Handling unique characteristics of each document type
-- **Unified Ingestion**: Creating consistent processing pipelines for mixed content
+### 2. PDF Document Processing (`2_pdf_loading.py`)
 
-## Document Type Comparison
+**📄 Full PDF lifecycle — creation, extraction, comparison, and RAG**
 
-| Feature | Text Files | PDF Files | Web Sources |
-|---------|------------|-----------|-------------|
-| **Processing Speed** | 🟢 Fastest | 🟡 Medium | 🔴 Slowest |
-| **Content Quality** | 🟢 Clean | 🟡 May have artifacts | 🟡 Cleanable |
-| **Reliability** | 🟢 High | 🟢 High | 🟡 Network dependent |
-| **Setup Complexity** | 🟢 Simple | 🟡 Medium | 🟡 Medium |
-| **Metadata Richness** | 🔴 Basic | 🟢 Rich | 🟡 Medium |
-| **Best For** | Simple content | Documents | Live/current data |
+Covers the complete workflow:
 
-## Running the Code
+- **PDF Creation** — converting text biographies to styled PDFs with ReportLab
+- **Page-Level Loading** — `PyPDFLoader` produces one `Document` per page with metadata
+- **PDF vs Text Comparison** — character count differences and formatting artifact analysis
+- **Chunk Distribution** — splitting PDF pages with overlap for vector search
+- **RAG Chain** — question-answering with a prompt aware of PDF artifacts
+- **Best Practices** — when to choose PDF loading, its advantages and pitfalls
+
+### 3. Web Content Integration (`3_web_sources.py`)
+
+**🌐 Live web scraping, HTML cleanup, and web-based RAG**
+
+End-to-end web content ingestion:
+
+- **Source Configuration** — Simple English Wikipedia URLs for clean demo content
+- **URL Accessibility Checks** — HEAD/GET probes before loading
+- **WebBaseLoader** — fetching pages with browser-like User-Agent headers
+- **BeautifulSoup Cleaning** — removing nav/script/footer elements, collapsing whitespace
+- **Structured Extraction** — title, section headings, and body from raw HTML
+- **Web-Tuned Chunking** — separator hierarchy tailored to HTML-extracted prose
+- **RAG Chain** — question-answering with web-sourced context
+- **Best Practices** — rate limiting, legal/ethical considerations, error handling
+
+## 📊 Document Type Comparison
+
+| Feature               | Text Files     | PDF Files             | Web Sources          |
+|-----------------------|----------------|-----------------------|----------------------|
+| **Processing Speed**  | 🟢 Fastest     | 🟡 Medium             | 🔴 Slowest           |
+| **Content Quality**   | 🟢 Clean       | 🟡 May have artifacts | 🟡 Needs cleaning    |
+| **Reliability**       | 🟢 High        | 🟢 High               | 🟡 Network dependent |
+| **Setup Complexity**  | 🟢 Simple      | 🟡 Medium             | 🟡 Medium            |
+| **Metadata Richness** | 🔴 Basic       | 🟢 Rich (pages)       | 🟡 Medium (headings) |
+| **Best For**          | Simple content | Formal documents      | Live / current data  |
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.13+
+- Azure OpenAI credentials in `.env`
+- Internet access (for `3_web_sources.py`)
+
+### Running the Scripts
 
 ```bash
-# Basic text file loading
+# Text file loading — four strategies + RAG chain
 uv run python "03_document_loading/1_text_files.py"
 
-# PDF document processing (creates sample PDFs)
+# PDF processing — creates sample PDFs, then loads and queries them
 uv run python "03_document_loading/2_pdf_loading.py"
 
-# Web content integration (requires internet)
+# Web content — scrapes Wikipedia, cleans HTML, runs RAG (requires internet)
 uv run python "03_document_loading/3_web_sources.py"
 ```
 
-## Expected Behavior
+## ✅ Expected Behaviour
 
-**1_text_files.py:**
-- Demonstrates 4 loading approaches with the same content
-- Shows chunk distribution across scientists
-- Creates comprehensive comparison analysis
+**`1_text_files.py`**
 
-**2_pdf_loading.py:**
-- Creates `datasets/pdfs/` directory with sample PDFs
-- Compares PDF vs. text extraction results
-- Shows page-level processing capabilities
+- Demonstrates four loading approaches with scientist biography files
+- Prints chunk distribution per scientist after splitting
+- Answers three test questions via RAG chain
+- Displays a comparison table of loading methods
 
-**3_web_sources.py:**
-- Loads from Wikipedia URLs with accessibility checks
-- Demonstrates simplified content cleaning with BeautifulSoup
-- Shows successful RAG question-answering with web content
-- Handles network errors gracefully with proper fallbacks
+**`2_pdf_loading.py`**
 
-## Dependencies Added
+- Creates `data/pdfs/` with styled PDFs (Ada Lovelace, Albert Einstein)
+- Shows page-level metadata from PyPDFLoader
+- Compares character counts between PDF and plain-text representations
+- Answers two test questions via PDF-based RAG chain
+- Prints best-practices summary
 
-This module adds several new dependencies:
-- **pypdf**: PDF text extraction
-- **reportlab**: PDF creation for demonstrations
-- **requests**: HTTP requests for web content
-- **beautifulsoup4**: HTML parsing and cleaning
+**`3_web_sources.py`**
 
-## Common Issues
+- Lists configured Wikipedia sources and probes accessibility
+- Loads pages with WebBaseLoader, then cleans with BeautifulSoup
+- Extracts structured metadata (title, headings) from HTML
+- Creates web-tuned chunks and answers three test questions via RAG
+- Prints best-practices and legal/ethical summary
 
-- **PDF extraction quality**: Some PDFs may have poor text extraction
-- **Web access**: Scripts handle network failures with fallback content
-- **Content encoding**: Files must be UTF-8 compatible
-- **Rate limiting**: Web scripts include delays to respect server limits
-- **File permissions**: Ensure write access for creating sample files
+## 🛠️ Key Dependencies
 
-## Content Processing Pipeline
+| Package            | Purpose                                |
+|--------------------|----------------------------------------|
+| `langchain`        | Document loaders, text splitters       |
+| `langchain-openai` | AzureChatOpenAI, AzureOpenAIEmbeddings |
+| `pypdf`            | PDF text extraction (PyPDFLoader)      |
+| `reportlab`        | PDF creation for demonstrations        |
+| `requests`         | HTTP requests for URL probing          |
+| `beautifulsoup4`   | HTML parsing and content cleaning      |
+| `python-dotenv`    | `.env` file loading                    |
 
-1. **Source Detection**: Identify file type and appropriate loader
-2. **Content Extraction**: Use format-specific extraction methods
-3. **Cleaning**: Remove artifacts and normalize formatting
-4. **Metadata Enrichment**: Add source tracking and document properties
-5. **Chunking**: Apply consistent text splitting across all sources
-6. **Indexing**: Create unified embeddings regardless of source type
+## ⚠️ Common Issues
 
-## Best Practices by Source Type
+- **PDF extraction quality** — some PDFs yield poor text; test with your own files
+- **Network failures** — `3_web_sources.py` raises `RuntimeError` if no URLs are accessible
+- **Rate limiting** — web script pauses 1 s between requests to respect server limits
+- **File encoding** — all text files must be UTF-8 compatible
+- **Write permissions** — `2_pdf_loading.py` creates the `data/pdfs/` directory
 
-**Text Files:**
-- Use DirectoryLoader with glob patterns for flexibility
-- Implement consistent metadata schemas
-- Consider file encoding issues
+## 🎓 Content Processing Pipeline
 
-**PDF Files:**
-- Test extraction quality with your specific PDF types
-- Preserve page-level information in metadata
-- Handle text extraction failures gracefully
+1. **Source Detection** — identify file type and choose the appropriate loader
+2. **Content Extraction** — format-specific extraction (text / PDF pages / HTML)
+3. **Cleaning** — remove artifacts, collapse whitespace, strip navigation elements
+4. **Metadata Enrichment** — add source tracking, page numbers, section headings
+5. **Chunking** — split with `RecursiveCharacterTextSplitter` (overlap for context)
+6. **Indexing & RAG** — embed chunks, store in vector store, query with LLM
 
-**Web Sources:**
-- Always check robots.txt and terms of service
-- Implement rate limiting and respectful crawling
-- Use simplified, robust cleaning approaches
-- Handle network failures gracefully
-- Clean navigation and UI elements effectively
+## 🚀 Next Steps
+
+After mastering document loading, continue with:
+
+- **04 Advanced Retrieval** — multi-query retrieval, re-ranking, hybrid search
+- **05 RAG Evaluation** — measuring retrieval and generation quality
+- **06 GraphRAG** — combining knowledge graphs with retrieval

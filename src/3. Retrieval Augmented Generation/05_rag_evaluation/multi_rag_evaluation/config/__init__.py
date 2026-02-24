@@ -1,3 +1,17 @@
-from . import settings
+from .settings import (
+    ChunkingConfig,
+    EvaluationQuestions,
+    ModelConfig,
+    PipelineSettings,
+    RetrievalConfig,
+    SETTINGS,
+)
 
-__all__ = ["settings"]
+__all__ = [
+    "ChunkingConfig",
+    "EvaluationQuestions",
+    "ModelConfig",
+    "PipelineSettings",
+    "RetrievalConfig",
+    "SETTINGS",
+]

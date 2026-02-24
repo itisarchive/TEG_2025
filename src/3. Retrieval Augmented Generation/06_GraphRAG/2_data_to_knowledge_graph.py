@@ -1,390 +1,372 @@
 """
-Data to Knowledge Graph Conversion
-==================================
+📊 PDF CVs → Neo4j Knowledge Graph Pipeline
+=============================================
 
-Extracts data from PDFs and JSONs, converts them to a knowledge graph using
-LangChain's LLMGraphTransformer, and stores in Neo4j.
+Extracts text from PDF CVs and converts them into a knowledge graph
+using LangChain's LLMGraphTransformer, then stores everything in Neo4j.
 
-This creates the static knowledge base for programmer staffing GraphRAG system.
+This creates the static knowledge base for the programmer-staffing
+GraphRAG system.  The pipeline is:
+    PDF  →  unstructured text  →  LLMGraphTransformer  →  Neo4j graph.
+
+🔧 Prerequisites:
+    - Azure OpenAI credentials in .env file
+    - Neo4j running (see 0_setup.py / start_session.sh)
+    - Generated CV PDFs (see 1_generate_data.py)
+
+🎯 What You'll Learn:
+    - How to extract structured knowledge from unstructured PDF documents
+    - How LLMGraphTransformer maps text onto a predefined ontology
+    - How to persist and validate a knowledge graph in Neo4j
 """
 
+import asyncio
+import logging
+import textwrap
+from pathlib import Path
+from typing import Any
+
+import toml
 from dotenv import load_dotenv
+from langchain_core.documents import Document
+from langchain_experimental.graph_transformers import LLMGraphTransformer
+from langchain_neo4j import Neo4jGraph
+from langchain_openai import AzureChatOpenAI
+from neo4j.exceptions import GqlError
+from unstructured.partition.pdf import partition_pdf
 
 load_dotenv(override=True)
 
-import os
-import asyncio
-from glob import glob
-from typing import List
-import logging
-from pathlib import Path
-import toml
-
-from unstructured.partition.pdf import partition_pdf
-from langchain_core.documents import Document
-from langchain_experimental.graph_transformers import LLMGraphTransformer
-from langchain_openai import ChatOpenAI
-from langchain_neo4j import Neo4jGraph
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ALLOWED_CV_NODE_TYPES: list[str] = [
+    "Person", "Company", "University", "Skill", "Technology",
+    "Project", "Certification", "Location", "JobTitle", "Industry",
+]
 
-class DataKnowledgeGraphBuilder:
-    """Builds knowledge graph from PDFs and JSONs using LangChain's LLMGraphTransformer."""
+ALLOWED_CV_RELATIONSHIP_TUPLES: list[tuple[str, str, str]] = [
+    ("Person", "WORKED_AT", "Company"),
+    ("Person", "STUDIED_AT", "University"),
+    ("Person", "HAS_SKILL", "Skill"),
+    ("Person", "LOCATED_IN", "Location"),
+    ("Person", "HOLDS_POSITION", "JobTitle"),
+    ("Person", "WORKED_ON", "Project"),
+    ("Person", "EARNED", "Certification"),
+    ("JobTitle", "AT_COMPANY", "Company"),
+    ("Project", "USED_TECHNOLOGY", "Technology"),
+    ("Project", "FOR_COMPANY", "Company"),
+    ("Company", "IN_INDUSTRY", "Industry"),
+    ("Skill", "RELATED_TO", "Technology"),
+    ("Certification", "ISSUED_BY", "Company"),
+    ("University", "LOCATED_IN", "Location"),
+]
 
-    def __init__(self, config_path: str = "utils/config.toml"):
-        """Initialize the data knowledge graph builder."""
-        self.config = self._load_config(config_path)
-        self.setup_neo4j()
-        self.setup_llm_transformer()
+EXTRACTABLE_NODE_PROPERTIES: list[str] = [
+    "start_date", "end_date", "level", "years_experience",
+]
 
-    def _load_config(self, config_path: str) -> dict:
-        """Load configuration from TOML file."""
-        if not os.path.exists(config_path):
-            raise ValueError(f"Configuration file not found: {config_path}")
+NEO4J_PERFORMANCE_INDEX_STATEMENTS: list[str] = [
+    "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.id)",
+    "CREATE INDEX company_name IF NOT EXISTS FOR (c:Company) ON (c.id)",
+    "CREATE INDEX skill_name IF NOT EXISTS FOR (s:Skill) ON (s.id)",
+    "CREATE INDEX entity_base IF NOT EXISTS FOR (e:__Entity__) ON (e.id)",
+]
 
-        with open(config_path, 'r') as f:
-            config = toml.load(f)
+GRAPH_VALIDATION_QUERIES: dict[str, str] = {
+    "Total nodes": "MATCH (n) RETURN count(n) as count",
+    "Total relationships": "MATCH ()-[r]->() RETURN count(r) as count",
+    "Node types": "MATCH (n) RETURN labels(n)[0] as type, count(n) as count ORDER BY count DESC",
+    "Relationship types": "MATCH ()-[r]->() RETURN type(r) as type, count(r) as count ORDER BY count DESC",
+}
 
-        return config
+SAMPLE_RELATIONSHIP_QUERIES: list[str] = [
+    "MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) RETURN p.id, s.id LIMIT 5",
+    "MATCH (p:Person)-[:WORKED_AT]->(c:Company) RETURN p.id, c.id LIMIT 5",
+]
 
-    def setup_neo4j(self):
-        """Setup Neo4j connection."""
+
+def print_section_header(title: str) -> None:
+    separator = "=" * 60
+    print(f"\n{separator}\n{title}\n{separator}")
+
+
+def load_toml_config(config_file_path: str = "utils/config.toml") -> dict[str, Any]:
+    """Load and return the TOML configuration file as a dictionary."""
+    resolved_path = Path(config_file_path)
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_file_path}")
+
+    with resolved_path.open("r", encoding="utf-8") as config_handle:
+        return toml.load(config_handle)
+
+
+class CvKnowledgeGraphBuilder:
+    """
+    Builds a Neo4j knowledge graph from PDF CVs using LangChain's LLMGraphTransformer.
+
+    The full pipeline executed by this builder:
+      1. Connect to Neo4j and wipe all existing data for a fresh start
+      2. Initialize an LLMGraphTransformer with a CV-specific ontology
+      3. Extract text from each CV PDF via the *unstructured* library
+      4. Convert extracted text into graph documents (nodes + relationships)
+      5. Persist graph documents in Neo4j with performance indexes
+      6. Validate the resulting graph by printing statistics and samples
+    """
+
+    def __init__(self, config_file_path: str = "utils/config.toml") -> None:
+        self.config = load_toml_config(config_file_path)
+        self.neo4j_graph = self._connect_and_reset_neo4j()
+        self.cv_graph_transformer = self._build_cv_graph_transformer()
+
+    def _connect_and_reset_neo4j(self) -> Neo4jGraph:
+        """Connect to Neo4j, wipe all data, constraints, and indexes for a fresh start."""
         try:
-            self.graph = Neo4jGraph()
+            neo4j_connection = Neo4jGraph()
             logger.info("✓ Connected to Neo4j successfully")
-
-            # Complete cleanup for fresh start
-            logger.info("Performing complete Neo4j cleanup...")
-            self.complete_cleanup()
-            logger.info("✓ Neo4j completely cleared")
-
-        except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {e}")
+        except (GqlError, ConnectionError, OSError) as connection_error:
+            logger.error("Failed to connect to Neo4j: %s", connection_error)
             raise
 
-    def complete_cleanup(self):
-        """Perform complete Neo4j database cleanup."""
-        try:
-            # Step 1: Delete all nodes and relationships
-            logger.info("  - Deleting all nodes and relationships...")
-            self.graph.query("MATCH (n) DETACH DELETE n")
+        logger.info("Performing complete Neo4j cleanup…")
+        self._perform_full_database_cleanup(neo4j_connection)
+        logger.info("✓ Neo4j completely cleared")
+        return neo4j_connection
 
-            # Step 2: Drop all constraints
-            logger.info("  - Dropping all constraints...")
-            constraints_query = "SHOW CONSTRAINTS"
-            constraints = self.graph.query(constraints_query)
-            for constraint in constraints:
-                constraint_name = constraint.get('name', '')
+    @staticmethod
+    def _perform_full_database_cleanup(neo4j_connection: Neo4jGraph) -> None:
+        """Delete every node/relationship, drop all constraints and indexes."""
+        try:
+            logger.info("  - Deleting all nodes and relationships…")
+            neo4j_connection.query("MATCH (n) DETACH DELETE n")
+
+            logger.info("  - Dropping all constraints…")
+            for constraint_row in neo4j_connection.query("SHOW CONSTRAINTS"):
+                constraint_name = constraint_row.get("name", "")
                 if constraint_name:
                     try:
-                        drop_query = f"DROP CONSTRAINT {constraint_name}"
-                        self.graph.query(drop_query)
-                        logger.debug(f"    Dropped constraint: {constraint_name}")
-                    except Exception as e:
-                        logger.debug(f"    Could not drop constraint {constraint_name}: {e}")
+                        neo4j_connection.query(f"DROP CONSTRAINT {constraint_name}")
+                    except GqlError as constraint_drop_error:
+                        logger.debug("    Could not drop constraint %s: %s", constraint_name, constraint_drop_error)
 
-            # Step 3: Drop all indexes
-            logger.info("  - Dropping all indexes...")
-            indexes_query = "SHOW INDEXES"
-            indexes = self.graph.query(indexes_query)
-            for index in indexes:
-                index_name = index.get('name', '')
-                if index_name and not index_name.startswith('__'):  # Skip system indexes
+            logger.info("  - Dropping all indexes…")
+            for index_row in neo4j_connection.query("SHOW INDEXES"):
+                index_name = index_row.get("name", "")
+                if index_name and not index_name.startswith("__"):
                     try:
-                        drop_query = f"DROP INDEX {index_name}"
-                        self.graph.query(drop_query)
-                        logger.debug(f"    Dropped index: {index_name}")
-                    except Exception as e:
-                        logger.debug(f"    Could not drop index {index_name}: {e}")
+                        neo4j_connection.query(f"DROP INDEX {index_name}")
+                    except GqlError as index_drop_error:
+                        logger.debug("    Could not drop index %s: %s", index_name, index_drop_error)
 
-            # Step 4: Verify cleanup
-            node_count = self.graph.query("MATCH (n) RETURN count(n) as count")[0]['count']
-            rel_count = self.graph.query("MATCH ()-[r]->() RETURN count(r) as count")[0]['count']
+            remaining_node_count = neo4j_connection.query("MATCH (n) RETURN count(n) as count")[0]["count"]
+            remaining_rel_count = neo4j_connection.query("MATCH ()-[r]->() RETURN count(r) as count")[0]["count"]
 
-            if node_count == 0 and rel_count == 0:
+            if remaining_node_count == 0 and remaining_rel_count == 0:
                 logger.info("  ✓ Database completely clean")
             else:
-                logger.warning(f"  ⚠ Cleanup incomplete: {node_count} nodes, {rel_count} relationships remain")
+                logger.warning(
+                    "  ⚠ Cleanup incomplete: %d nodes, %d relationships remain",
+                    remaining_node_count, remaining_rel_count,
+                )
 
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-            # Fallback to basic cleanup
-            logger.info("  - Falling back to basic cleanup...")
-            self.graph.query("MATCH (n) DETACH DELETE n")
+        except GqlError as cleanup_error:
+            logger.error("Error during cleanup: %s", cleanup_error)
+            logger.info("  - Falling back to basic cleanup…")
+            neo4j_connection.query("MATCH (n) DETACH DELETE n")
 
-    def setup_llm_transformer(self):
-        """Setup LLM and graph transformer with CV-specific schema."""
-        # Initialize LLM - using GPT-4o-mini for cost efficiency
-        self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
+    @staticmethod
+    def _build_cv_graph_transformer() -> LLMGraphTransformer:
+        """
+        Create an LLMGraphTransformer configured with the CV-specific ontology.
 
-        # Define CV-specific ontology
-        self.allowed_nodes = [
-            "Person", "Company", "University", "Skill", "Technology",
-            "Project", "Certification", "Location", "JobTitle", "Industry"
-        ]
+        The transformer uses Azure OpenAI (gpt-4.1-mini) with temperature=0 for
+        deterministic extraction.  Strict mode ensures only nodes and relationships
+        from the predefined CV schema are produced.
+        """
+        azure_chat_llm = AzureChatOpenAI(model="gpt-4.1-mini", temperature=0)
 
-        # Define relationships with directional tuples
-        self.allowed_relationships = [
-            ("Person", "WORKED_AT", "Company"),
-            ("Person", "STUDIED_AT", "University"),
-            ("Person", "HAS_SKILL", "Skill"),
-            ("Person", "LOCATED_IN", "Location"),
-            ("Person", "HOLDS_POSITION", "JobTitle"),
-            ("Person", "WORKED_ON", "Project"),
-            ("Person", "EARNED", "Certification"),
-            ("JobTitle", "AT_COMPANY", "Company"),
-            ("Project", "USED_TECHNOLOGY", "Technology"),
-            ("Project", "FOR_COMPANY", "Company"),
-            ("Company", "IN_INDUSTRY", "Industry"),
-            ("Skill", "RELATED_TO", "Technology"),
-            ("Certification", "ISSUED_BY", "Company"),
-            ("University", "LOCATED_IN", "Location")
-        ]
-
-        # Initialize transformer with strict schema
-        self.llm_transformer = LLMGraphTransformer(
-            llm=self.llm,
-            allowed_nodes=self.allowed_nodes,
-            allowed_relationships=self.allowed_relationships,
-            node_properties=["start_date", "end_date", "level", "years_experience"],
-            strict_mode=True
+        cv_transformer = LLMGraphTransformer(
+            llm=azure_chat_llm,
+            allowed_nodes=ALLOWED_CV_NODE_TYPES,
+            allowed_relationships=ALLOWED_CV_RELATIONSHIP_TUPLES,
+            node_properties=EXTRACTABLE_NODE_PROPERTIES,
+            strict_mode=True,
         )
 
         logger.info("✓ LLM Graph Transformer initialized with CV schema")
+        return cv_transformer
 
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extract text content from PDF using unstructured.
-
-        Args:
-            pdf_path: Path to the PDF file
-
-        Returns:
-            str: Extracted text content
-        """
+    @staticmethod
+    def extract_text_from_pdf(pdf_file_path: str) -> str:
+        """Extract full text content from a single PDF using the *unstructured* library."""
         try:
-            # Use unstructured to parse PDF
-            elements = partition_pdf(filename=pdf_path)
-
-            # Combine all text elements into single document
-            # This is crucial - processing as single document maintains context
-            full_text = "\n\n".join([str(element) for element in elements])
-
-            logger.debug(f"Extracted {len(full_text)} characters from {pdf_path}")
-            return full_text
-
-        except Exception as e:
-            logger.error(f"Failed to extract text from {pdf_path}: {e}")
+            parsed_elements = partition_pdf(filename=pdf_file_path)
+            extracted_full_text = "\n\n".join(str(element) for element in parsed_elements)
+            logger.debug("Extracted %d characters from %s", len(extracted_full_text), pdf_file_path)
+            return extracted_full_text
+        except (OSError, ValueError) as pdf_extraction_error:
+            logger.error("Failed to extract text from %s: %s", pdf_file_path, pdf_extraction_error)
             return ""
 
-    async def convert_cv_to_graph(self, pdf_path: str) -> List:
-        """Convert a single CV PDF to graph documents.
-
-        Args:
-            pdf_path: Path to the PDF file
-
-        Returns:
-            List: Graph documents extracted from the CV
+    async def convert_single_cv_to_graph_documents(self, pdf_file_path: str) -> list:
         """
-        logger.info(f"Processing: {Path(pdf_path).name}")
+        Convert one CV PDF into LangChain graph documents via the LLM transformer.
 
-        # Extract text from PDF
-        text_content = self.extract_text_from_pdf(pdf_path)
+        Steps: extract text → wrap as LangChain Document → asynchronously transform
+        into nodes and relationships using the CV ontology.
+        """
+        logger.info("Processing: %s", Path(pdf_file_path).name)
 
-        if not text_content.strip():
-            logger.warning(f"No text extracted from {pdf_path}")
+        extracted_cv_text = self.extract_text_from_pdf(pdf_file_path)
+        if not extracted_cv_text.strip():
+            logger.warning("No text extracted from %s", pdf_file_path)
             return []
 
-        # Create Document object
-        document = Document(
-            page_content=text_content,
-            metadata={"source": pdf_path, "type": "cv"}
+        cv_langchain_document = Document(
+            page_content=extracted_cv_text,
+            metadata={"source": pdf_file_path, "type": "cv"},
         )
 
-        # Convert to graph documents using LLM
         try:
-            graph_documents = await self.llm_transformer.aconvert_to_graph_documents([document])
-            logger.info(f"✓ Extracted graph from {Path(pdf_path).name}")
+            produced_graph_documents = await self.cv_graph_transformer.aconvert_to_graph_documents(
+                [cv_langchain_document],
+            )
+            logger.info("✓ Extracted graph from %s", Path(pdf_file_path).name)
 
-            # Log extraction statistics
-            if graph_documents:
-                nodes_count = len(graph_documents[0].nodes)
-                relationships_count = len(graph_documents[0].relationships)
-                logger.info(f"  - Nodes: {nodes_count}, Relationships: {relationships_count}")
+            if produced_graph_documents:
+                extracted_nodes_count = len(produced_graph_documents[0].nodes)
+                extracted_relationships_count = len(produced_graph_documents[0].relationships)
+                logger.info("  - Nodes: %d, Relationships: %d", extracted_nodes_count, extracted_relationships_count)
 
-            return graph_documents
+            return produced_graph_documents
 
-        except Exception as e:
-            logger.error(f"Failed to convert {pdf_path} to graph: {e}")
+        except (ValueError, RuntimeError) as conversion_error:
+            logger.error("Failed to convert %s to graph: %s", pdf_file_path, conversion_error)
             return []
 
-    async def process_all_cvs(self, cv_directory: str = None) -> int:
-        """Process all PDF CVs in the directory.
+    async def process_all_cv_pdfs(self, cv_directory_path: str | None = None) -> int:
+        """Process every PDF in *cv_directory_path* and store the resulting graph in Neo4j."""
+        if cv_directory_path is None:
+            cv_directory_path = self.config["output"]["programmers_dir"]
 
-        Args:
-            cv_directory: Directory containing PDF CVs (defaults to config value)
+        cv_pdf_directory = Path(cv_directory_path)
+        sorted_pdf_files = sorted(cv_pdf_directory.glob("*.pdf"))
 
-        Returns:
-            int: Number of successfully processed CVs
-        """
-        # Use config directory if not specified
-        if cv_directory is None:
-            cv_directory = self.config['output']['programmers_dir']
-
-        # Find all PDF files
-        pdf_pattern = os.path.join(cv_directory, "*.pdf")
-        pdf_files = glob(pdf_pattern)
-
-        if not pdf_files:
-            logger.error(f"No PDF files found in {cv_directory}")
+        if not sorted_pdf_files:
+            logger.error("No PDF files found in %s", cv_directory_path)
             return 0
 
-        logger.info(f"Found {len(pdf_files)} PDF files to process")
+        logger.info("Found %d PDF files to process", len(sorted_pdf_files))
 
-        processed_count = 0
-        all_graph_documents = []
+        successfully_processed_count = 0
+        accumulated_graph_documents: list = []
 
-        # Process each CV
-        for pdf_path in pdf_files:
-            graph_documents = await self.convert_cv_to_graph(pdf_path)
-
-            if graph_documents:
-                all_graph_documents.extend(graph_documents)
-                processed_count += 1
+        for pdf_file in sorted_pdf_files:
+            single_cv_graph_documents = await self.convert_single_cv_to_graph_documents(str(pdf_file))
+            if single_cv_graph_documents:
+                accumulated_graph_documents.extend(single_cv_graph_documents)
+                successfully_processed_count += 1
             else:
-                logger.warning(f"Failed to process {pdf_path}")
+                logger.warning("Failed to process %s", pdf_file)
 
-        # Store all graph documents in Neo4j
-        if all_graph_documents:
-            logger.info("Storing graph documents in Neo4j...")
-            self.store_graph_documents(all_graph_documents)
+        if accumulated_graph_documents:
+            logger.info("Storing graph documents in Neo4j…")
+            self._store_graph_documents_in_neo4j(accumulated_graph_documents)
 
-        return processed_count
+        return successfully_processed_count
 
-    def store_graph_documents(self, graph_documents: List):
-        """Store graph documents in Neo4j.
-
-        Args:
-            graph_documents: List of GraphDocument objects
-        """
+    def _store_graph_documents_in_neo4j(self, graph_documents_to_store: list) -> None:
+        """Persist graph documents in Neo4j and create performance indexes."""
         try:
-            # Add graph documents to Neo4j with enhanced options
-            self.graph.add_graph_documents(
-                graph_documents,
-                baseEntityLabel=True,  # Add base Entity label for indexing
-                include_source=True  # Include source documents for RAG
+            self.neo4j_graph.add_graph_documents(
+                graph_documents_to_store,
+                baseEntityLabel=True,
+                include_source=True,
             )
 
-            # Calculate and log statistics
-            total_nodes = sum(len(doc.nodes) for doc in graph_documents)
-            total_relationships = sum(len(doc.relationships) for doc in graph_documents)
+            total_stored_nodes = sum(len(doc.nodes) for doc in graph_documents_to_store)
+            total_stored_relationships = sum(len(doc.relationships) for doc in graph_documents_to_store)
 
-            logger.info(f"✓ Stored {len(graph_documents)} documents in Neo4j")
-            logger.info(f"✓ Total nodes: {total_nodes}")
-            logger.info(f"✓ Total relationships: {total_relationships}")
+            logger.info("✓ Stored %d documents in Neo4j", len(graph_documents_to_store))
+            logger.info("✓ Total nodes: %d", total_stored_nodes)
+            logger.info("✓ Total relationships: %d", total_stored_relationships)
 
-            # Create useful indexes for performance
-            self.create_indexes()
+            self._create_performance_indexes()
 
-        except Exception as e:
-            logger.error(f"Failed to store graph documents: {e}")
+        except (GqlError, RuntimeError) as storage_error:
+            logger.error("Failed to store graph documents: %s", storage_error)
             raise
 
-    def create_indexes(self):
-        """Create indexes for better query performance."""
-        indexes = [
-            "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.id)",
-            "CREATE INDEX company_name IF NOT EXISTS FOR (c:Company) ON (c.id)",
-            "CREATE INDEX skill_name IF NOT EXISTS FOR (s:Skill) ON (s.id)",
-            "CREATE INDEX entity_base IF NOT EXISTS FOR (e:__Entity__) ON (e.id)"
-        ]
-
-        for index_query in indexes:
+    def _create_performance_indexes(self) -> None:
+        """Create Neo4j indexes for faster lookups on frequently-queried node types."""
+        for index_statement in NEO4J_PERFORMANCE_INDEX_STATEMENTS:
             try:
-                self.graph.query(index_query)
-                logger.debug(f"Created index: {index_query}")
-            except Exception as e:
-                logger.debug(f"Index might already exist: {e}")
+                self.neo4j_graph.query(index_statement)
+                logger.debug("Created index: %s", index_statement)
+            except GqlError as index_creation_error:
+                logger.debug("Index might already exist: %s", index_creation_error)
 
-    def validate_graph(self):
-        """Validate the created knowledge graph."""
-        logger.info("Validating knowledge graph...")
+    def validate_graph(self) -> None:
+        """Print statistics and sample relationships to verify the graph was built correctly."""
+        logger.info("Validating knowledge graph…")
 
-        # Basic statistics
-        queries = {
-            "Total nodes": "MATCH (n) RETURN count(n) as count",
-            "Total relationships": "MATCH ()-[r]->() RETURN count(r) as count",
-            "Node types": "MATCH (n) RETURN labels(n)[0] as type, count(n) as count ORDER BY count DESC",
-            "Relationship types": "MATCH ()-[r]->() RETURN type(r) as type, count(r) as count ORDER BY count DESC"
-        }
-
-        for description, query in queries.items():
+        for query_description, cypher_query in GRAPH_VALIDATION_QUERIES.items():
             try:
-                result = self.graph.query(query)
-                if description in ["Total nodes", "Total relationships"]:
-                    logger.info(f"{description}: {result[0]['count']}")
+                query_result = self.neo4j_graph.query(cypher_query)
+                if query_description in ("Total nodes", "Total relationships"):
+                    logger.info("%s: %s", query_description, query_result[0]["count"])
                 else:
-                    logger.info(f"\n{description}:")
-                    for row in result[:10]:  # Show top 10
-                        if 'type' in row:
-                            logger.info(f"  {row['type']}: {row['count']}")
+                    logger.info("\n%s:", query_description)
+                    for result_row in query_result[:10]:
+                        if "type" in result_row:
+                            logger.info("  %s: %s", result_row["type"], result_row["count"])
                         else:
-                            logger.info(f"  {row}")
-
-            except Exception as e:
-                logger.error(f"Failed to execute validation query '{description}': {e}")
-
-        # Sample queries to verify extraction quality
-        sample_queries = [
-            "MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) RETURN p.id, s.id LIMIT 5",
-            "MATCH (p:Person)-[:WORKED_AT]->(c:Company) RETURN p.id, c.id LIMIT 5"
-        ]
+                            logger.info("  %s", result_row)
+            except GqlError as validation_error:
+                logger.error("Failed to execute validation query '%s': %s", query_description, validation_error)
 
         logger.info("\nSample relationships:")
-        for query in sample_queries:
+        for sample_query in SAMPLE_RELATIONSHIP_QUERIES:
             try:
-                result = self.graph.query(query)
-                for row in result:
-                    logger.info(f"  {dict(row)}")
-            except Exception as e:
-                logger.debug(f"Sample query failed: {e}")
+                for result_row in self.neo4j_graph.query(sample_query):
+                    logger.info("  %s", dict(result_row))
+            except GqlError as sample_query_error:
+                logger.debug("Sample query failed: %s", sample_query_error)
 
 
-async def main():
-    """Main function to convert CVs to knowledge graph."""
-    print("Converting PDF CVs to Knowledge Graph")
-    print("=" * 50)
+async def main() -> None:
+    """Convert all generated CV PDFs into a Neo4j knowledge graph."""
+    print_section_header("Converting PDF CVs to Knowledge Graph")
 
     try:
-        # Initialize builder
-        builder = DataKnowledgeGraphBuilder()
+        graph_builder = CvKnowledgeGraphBuilder()
+        processed_cv_count = await graph_builder.process_all_cv_pdfs()
 
-        # Process all CVs
-        processed_count = await builder.process_all_cvs()
+        if processed_cv_count > 0:
+            graph_builder.validate_graph()
+            print(textwrap.dedent(f"""\
 
-        if processed_count > 0:
-            # Validate the graph
-            builder.validate_graph()
+                ✓ Successfully processed {processed_cv_count} CV(s)
+                ✓ Knowledge graph created in Neo4j
 
-            print(f"\n✓ Successfully processed {processed_count} CV(s)")
-            print("✓ Knowledge graph created in Neo4j")
-            print("\nNext steps:")
-            print("1. Run: uv run python 3_query_knowledge_graph.py")
-            print("2. Open Neo4j Browser to explore the graph")
-            print("3. Try GraphRAG queries!")
+                Next steps:
+                1. Run: uv run python 3_query_knowledge_graph.py
+                2. Open Neo4j Browser to explore the graph
+                3. Try GraphRAG queries!"""))
         else:
-            print("❌ No CVs were successfully processed")
-            print("Please check the PDF files in data/cvs_pdf/ directory")
+            print(textwrap.dedent("""\
+                ❌ No CVs were successfully processed
+                Please check the PDF files in data/programmers/ directory"""))
 
-    except Exception as e:
-        logger.error(f"Failed to build knowledge graph: {e}")
-        print(f"❌ Error: {e}")
+    except FileNotFoundError as file_error:
+        logger.error("File not found: %s", file_error)
+        print(f"❌ Error: {file_error}")
+    except (GqlError, ConnectionError) as database_error:
+        logger.error("Database error: %s", database_error)
+        print(f"❌ Database Error: {database_error}")
+    except RuntimeError as runtime_error:
+        logger.error("Failed to build knowledge graph: %s", runtime_error)
+        print(f"❌ Error: {runtime_error}")
 
 
 if __name__ == "__main__":
