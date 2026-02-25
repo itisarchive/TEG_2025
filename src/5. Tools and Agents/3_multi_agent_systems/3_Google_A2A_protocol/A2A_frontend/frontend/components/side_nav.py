@@ -17,7 +17,7 @@ page_json = [
 ]
 
 
-def on_sidenav_menu_click(e: me.ClickEvent):  # pylint: disable=unused-argument
+def on_sidenav_menu_click(e: me.ClickEvent):
     """Side navigation menu click handler"""
     state = me.state(AppState)
     state.sidenav_open = not state.sidenav_open
@@ -82,7 +82,6 @@ def sidenav(current_page: str):
                     page['display'],
                     not app_state.sidenav_open,
                 )
-            # settings & theme toggle
             with me.box(style=MENU_BOTTOM):
                 theme_toggle_icon(
                     9,
@@ -90,7 +89,6 @@ def sidenav(current_page: str):
                     'Theme',
                     not app_state.sidenav_open,
                 )
-                # menu_item(10, "settings", "Settings", not app_state.sidenav_open)
 
 
 def menu_item(
@@ -101,7 +99,7 @@ def menu_item(
         content_style: me.Style = DEFAULT_MENU_STYLE,
 ):
     """Render menu item"""
-    if minimized:  # minimized
+    if minimized:
         with me.box(
                 style=me.Style(
                     display='flex',
@@ -119,7 +117,7 @@ def menu_item(
                 with me.tooltip(message=text):
                     me.icon(icon=icon)
 
-    else:  # expanded
+    else:
         with me.content_button(
                 key=str(key),
                 on_click=navigate_to,
@@ -137,7 +135,7 @@ def menu_item(
                 me.text(text)
 
 
-def toggle_theme(e: me.ClickEvent):  # pylint: disable=unused-argument
+def toggle_theme(e: me.ClickEvent):
     """Toggle theme event"""
     s = me.state(AppState)
     if me.theme_brightness() == 'light':
@@ -150,8 +148,7 @@ def toggle_theme(e: me.ClickEvent):  # pylint: disable=unused-argument
 
 def theme_toggle_icon(key: int, icon: str, text: str, min: bool = True):
     """Theme toggle icon"""
-    # THEME_TOGGLE_STYLE = me.Style(position="absolute", bottom=50, align_content="left")
-    if min:  # minimized
+    if min:
         with me.box(
                 style=me.Style(
                     display='flex',
@@ -163,7 +160,6 @@ def theme_toggle_icon(key: int, icon: str, text: str, min: bool = True):
             with me.content_button(
                     key=str(key),
                     on_click=toggle_theme,
-                    # style=THEME_TOGGLE_STYLE,
                     type='icon',
             ):
                 with me.tooltip(message=text):
@@ -173,11 +169,10 @@ def theme_toggle_icon(key: int, icon: str, text: str, min: bool = True):
                         else 'dark_mode'
                     )
 
-    else:  # expanded
+    else:
         with me.content_button(
                 key=str(key),
                 on_click=toggle_theme,
-                # style=THEME_TOGGLE_STYLE,
         ):
             with me.box(
                     style=me.Style(

@@ -25,7 +25,7 @@ from state.state import AppState
 load_dotenv()
 
 
-def on_load(e: me.LoadEvent):  # pylint: disable=unused-argument
+def on_load(e: me.LoadEvent):
     """On load event"""
     state = me.state(AppState)
     me.set_theme_mode(state.theme_mode)
@@ -34,8 +34,6 @@ def on_load(e: me.LoadEvent):  # pylint: disable=unused-argument
     else:
         state.current_conversation_id = ''
 
-    # check if the API key is set in the environment
-    # and if the user is using Vertex AI
     uses_vertex_ai = (
             os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').upper() == 'TRUE'
     )
@@ -46,11 +44,9 @@ def on_load(e: me.LoadEvent):  # pylint: disable=unused-argument
     elif api_key:
         state.api_key = api_key
     else:
-        # Show the API key dialog if both are not set
         state.api_key_dialog_open = True
 
 
-# Policy to allow the lit custom element to load
 security_policy = me.SecurityPolicy(
     allowed_script_srcs=[
         'https://cdn.jsdelivr.net',
@@ -67,9 +63,8 @@ security_policy = me.SecurityPolicy(
 def home_page():
     """Main Page"""
     state = me.state(AppState)
-    # Show API key dialog if needed
     api_key_dialog()
-    with page_scaffold():  # pylint: disable=not-context-manager
+    with page_scaffold():
         home_page_content(state)
 
 
@@ -133,7 +128,6 @@ def task_page():
     task_list_page(me.state(AppState))
 
 
-# Setup the server global objects
 app = FastAPI()
 router = APIRouter()
 agent_server = ConversationServer(router)
@@ -151,11 +145,9 @@ app.mount(
 if __name__ == '__main__':
     import uvicorn
 
-    # Setup the connection details, these should be set in the environment
     host = os.environ.get('A2A_UI_HOST', '0.0.0.0')
     port = int(os.environ.get('A2A_UI_PORT', '12000'))
 
-    # Set the client to talk to the server
     host_agent_service.server_url = f'http://{host}:{port}'
 
     uvicorn.run(

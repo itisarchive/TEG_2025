@@ -50,7 +50,7 @@ def conversation_list(conversations: list[StateConversation]):
             me.icon(icon='add')
 
 
-async def add_conversation(e: me.ClickEvent):  # pylint: disable=unused-argument
+async def add_conversation(e: me.ClickEvent):
     """Add conversation button handler"""
     response = await CreateConversation()
     me.state(AppState).messages = []

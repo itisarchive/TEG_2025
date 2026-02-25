@@ -148,9 +148,6 @@ class TaskPushNotificationConfig(BaseModel):
     pushNotificationConfig: PushNotificationConfig
 
 
-## RPC Messages
-
-
 class JSONRPCMessage(BaseModel):
     jsonrpc: Literal['2.0'] = '2.0'
     id: int | str | None = Field(default_factory=lambda: uuid4().hex)
@@ -247,9 +244,6 @@ A2ARequest = TypeAdapter(
         Field(discriminator='method'),
     ]
 )
-
-
-## Error types
 
 
 class JSONParseError(JSONRPCError):

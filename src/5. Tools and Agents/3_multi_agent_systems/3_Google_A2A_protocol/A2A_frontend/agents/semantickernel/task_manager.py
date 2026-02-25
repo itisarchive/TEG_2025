@@ -114,7 +114,6 @@ class TaskManager(InMemoryTaskManager):
                 artifact = None
 
                 new_status = TaskStatus(state=TaskState.WORKING)
-                # By default, don't end the stream
                 final = False
 
                 if require_input:
@@ -123,7 +122,6 @@ class TaskManager(InMemoryTaskManager):
                         role='agent',
                         parts=[{'type': 'text', 'text': text_content}],
                     )
-                    # End the stream if we need user input
                     final = True
                 elif is_done:
                     new_status.state = TaskState.COMPLETED
@@ -132,10 +130,8 @@ class TaskManager(InMemoryTaskManager):
                         index=0,
                         append=False,
                     )
-                    # End the stream if the agent is fully done
                     final = True
                 else:
-                    # Still "WORKING"
                     new_status.message = Message(
                         role='agent',
                         parts=[{'type': 'text', 'text': text_content}],
@@ -149,7 +145,6 @@ class TaskManager(InMemoryTaskManager):
                         request.params.id, task_artifact_update_event
                     )
 
-                # Persist + notify
                 updated_task = await self.update_store(
                     request.params.id,
                     new_status,

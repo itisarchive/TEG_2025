@@ -179,11 +179,9 @@ Current agent: {current_agent['active_agent']}
                 metadata=metadata,
             ),
             acceptedOutputModes=['text', 'text/plain', 'image/png'],
-            # pushNotification=None,
             metadata={'conversation_id': sessionId},
         )
         task = await client.send_task(request, self.task_callback)
-        # Assume completion unless a state returns that isn't complete
         state['session_active'] = task.status.state not in [
             TaskState.COMPLETED,
             TaskState.CANCELED,
@@ -191,18 +189,14 @@ Current agent: {current_agent['active_agent']}
             TaskState.UNKNOWN,
         ]
         if task.status.state == TaskState.INPUT_REQUIRED:
-            # Force user input back
             tool_context.actions.skip_summarization = True
             tool_context.actions.escalate = True
         elif task.status.state == TaskState.CANCELED:
-            # Open question, should we return some info for cancellation instead
             raise ValueError(f'Agent {agent_name} task {task.id} is cancelled')
         elif task.status.state == TaskState.FAILED:
-            # Raise error for failure
             raise ValueError(f'Agent {agent_name} task {task.id} failed')
         response = []
         if task.status.message:
-            # Assume the information is in the task message.
             response.extend(
                 convert_parts(task.status.message.parts, tool_context)
             )
@@ -225,8 +219,6 @@ def convert_part(part: Part, tool_context: ToolContext):
     if part.type == 'data':
         return part.data
     if part.type == 'file':
-        # Repackage A2A FilePart to google.genai Blob
-        # Currently not considering plain text as files
         file_id = part.file.name
         file_bytes = base64.b64decode(part.file.bytes)
         file_part = types.Part(

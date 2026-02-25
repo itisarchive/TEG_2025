@@ -5,11 +5,9 @@ Demonstrates the FastMCP pattern for creating MCP tools.
 
 from mcp.server.fastmcp import FastMCP
 
-# Initialize FastMCP server - creates an MCP server named "math"
 mcp = FastMCP("math")
 
 
-# @mcp.tool() decorator exposes this function as an MCP tool
 @mcp.tool()
 def add(a: float, b: float) -> float:
     """Add two numbers.

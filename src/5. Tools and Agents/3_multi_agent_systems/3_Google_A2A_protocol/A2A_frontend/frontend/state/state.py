@@ -23,7 +23,6 @@ class StateMessage:
 
     message_id: str = ''
     role: str = ''
-    # Each content entry is a content, media type pair.
     content: list[tuple[ContentPart, str]] = dataclasses.field(
         default_factory=list
     )
@@ -58,7 +57,6 @@ class StateEvent:
     actor: str = ''
     role: str = ''
     id: str = ''
-    # Each entry is a pair of (content, media type)
     content: list[tuple[ContentPart, str]] = dataclasses.field(
         default_factory=list
     )
@@ -77,15 +75,12 @@ class AppState:
     task_list: list[SessionTask] = dataclasses.field(default_factory=list)
     background_tasks: dict[str, str] = dataclasses.field(default_factory=dict)
     message_aliases: dict[str, str] = dataclasses.field(default_factory=dict)
-    # This is used to track the data entered in a form
     completed_forms: dict[str, dict[str, Any] | None] = dataclasses.field(
         default_factory=dict
     )
-    # This is used to track the message sent to agent with form data
     form_responses: dict[str, str] = dataclasses.field(default_factory=dict)
     polling_interval: int = 1
 
-    # Added for API key management
     api_key: str = ''
     uses_vertex_ai: bool = False
     api_key_dialog_open: bool = False

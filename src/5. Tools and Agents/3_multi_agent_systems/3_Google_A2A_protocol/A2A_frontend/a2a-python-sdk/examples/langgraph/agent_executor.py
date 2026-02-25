@@ -46,7 +46,6 @@ class CurrencyAgentExecutor(AgentExecutor):
             task = create_task_obj(params)
             await self.task_store.save(task)
 
-        # invoke the underlying agent
         agent_response: dict[str, Any] = self.agent.invoke(
             query, task.contextId
         )
@@ -56,7 +55,7 @@ class CurrencyAgentExecutor(AgentExecutor):
             root=SendMessageSuccessResponse(id=request.id, result=task)
         )
 
-    async def on_message_stream(  # type: ignore
+    async def on_message_stream(
             self, request: SendMessageStreamingRequest, task: Task | None
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
         """Handler for 'message/sendStream' requests."""
@@ -67,7 +66,6 @@ class CurrencyAgentExecutor(AgentExecutor):
             task = create_task_obj(params)
             await self.task_store.save(task)
 
-        # kickoff the streaming agent and process responses
         async for item in self.agent.stream(query, task.contextId):
             task_artifact_update_event, task_status_event = (
                 process_streaming_agent_response(task, item)
@@ -96,7 +94,7 @@ class CurrencyAgentExecutor(AgentExecutor):
             )
         )
 
-    async def on_resubscribe(  # type: ignore
+    async def on_resubscribe(
             self, request: TaskResubscriptionRequest, task: Task
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
         """Handler for 'tasks/resubscribe' requests."""

@@ -156,7 +156,6 @@ async def completeTask(
         taskResult = await client.send_task(payload)
         print(f'\n{taskResult.model_dump_json(exclude_none=True)}')
 
-    ## if the result is that more input is required, loop again.
     state = TaskState(taskResult.result.status.state)
     if state.name == TaskState.INPUT_REQUIRED.name:
         return await completeTask(
@@ -168,7 +167,6 @@ async def completeTask(
             taskId,
             sessionId,
         )
-    ## task is complete
     return True
 
 

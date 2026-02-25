@@ -14,7 +14,7 @@ from .async_poller import AsyncAction, async_poller
 from .side_nav import sidenav
 
 
-async def refresh_app_state(e: mel.WebEvent):  # pylint: disable=unused-argument
+async def refresh_app_state(e: mel.WebEvent):
     """Refresh app state event handler"""
     yield
     app_state = me.state(AppState)

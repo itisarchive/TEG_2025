@@ -33,7 +33,6 @@ class FormElement:
         'time',
         'url',
         'week',
-            # These are custom types that dictate non input elements.
         'radio',
         'checkbox',
         'date-picker',
@@ -50,7 +49,6 @@ class FormState:
     elements: list[FormElement]
 
     def __post_init__(self):
-        # Parse each element as FormElement. Clean up for non-recursive dict parse
         for i, element_dict in enumerate(self.elements):
             if isinstance(element_dict, dict):
                 self.elements[i] = FormElement(**element_dict)
@@ -60,7 +58,6 @@ class FormState:
 class State:
     """This contains the data in the form"""
 
-    # forms: dict[str, FormState]
     forms: dict[str, str]
 
 
@@ -77,15 +74,12 @@ def form_sent(message: StateMessage, app_state: AppState) -> bool:
 
 def render_form(message: StateMessage, app_state: AppState):
     """Renders the form or the data entered in a submitted form"""
-    # Check if the form was completed, if so, render the content as a card
     if message.message_id in app_state.completed_forms:
         render_form_card(message, app_state.completed_forms[message.message_id])
         return
-    # Otherwise, get the form structure.
     instructions, form_structure = generate_form_elements(message)
 
     data = {}
-    # Initialize the state data
     for element in form_structure:
         data[element.name] = element.value
 
@@ -123,12 +117,11 @@ def render_form_card(message: StateMessage, data: dict[str, Any] | None):
             )
     ):
         if data:
-            # Build markdown result
             lines = []
             for k, v in data.items():
                 lines.append(
                     f'**{k}**: {v}  '
-                )  # end with 2 spaces to force newline
+                )
 
             me.markdown('\n'.join(lines).rstrip())
         else:
@@ -139,7 +132,6 @@ def generate_form_elements(
         message: StateMessage,
 ) -> tuple[str, list[FormElement]]:
     """Returns a declarative structure for a form to generate"""
-    # Get the message part with the form information.
     form_content = next(filter(lambda x: x[1] == 'form', message.content), None)
     if not form_content:
         return []
@@ -152,8 +144,6 @@ def generate_form_elements(
 def make_form_elements(form_info: dict[str, Any]) -> list[FormElement]:
     if 'form' not in form_info or 'properties' not in form_info['form']:
         return []
-    # This is the key, value pairs of field names -> field info. Now we need to
-    # supplement it.
     fields = form_info['form']['properties']
     if 'required' in form_info['form'] and isinstance(
             form_info['form']['required'], list
@@ -164,7 +154,6 @@ def make_form_elements(form_info: dict[str, Any]) -> list[FormElement]:
     if 'form_data' in form_info and isinstance(form_info['form_data'], dict):
         for field, value in form_info['form_data'].items():
             fields[field]['value'] = value
-    # Now convert the dictionary to FormElements
     elements = []
     for key, info in fields.items():
         elements.append(
@@ -174,7 +163,6 @@ def make_form_elements(form_info: dict[str, Any]) -> list[FormElement]:
                 value=info['value'] if 'value' in info else '',
                 required=info['required'] if 'required' in info else False,
                 formType=info['format'] if 'format' in info else 'text',
-                # TODO more details for input like validation rules
                 formDetails={},
             )
         )
@@ -328,7 +316,6 @@ async def submit_form(e: me.ClickEvent):
         state = me.state(State)
         id = e.key
         form = FormState(**json.loads(state.forms[id]))
-        # Replace with real validation logic.
         errors = {}
         for element in form.elements:
             if element.name == 'error':
@@ -339,7 +326,6 @@ async def submit_form(e: me.ClickEvent):
                 )
         form.errors = errors
         state.forms[id] = form_state_to_string(form)
-        # Replace with form processing logic.
         if errors:
             return
         app_state = me.state(AppState)
@@ -349,8 +335,6 @@ async def submit_form(e: me.ClickEvent):
         print('Failed to submit form', e)
 
 
-# There is some issue with mesop serialization. Instead we use raw string
-# in the server state and interpret it as needed.
 def form_state_to_string(form: FormState) -> str:
     form_dict = dataclasses.asdict(form)
     return json.dumps(form_dict)

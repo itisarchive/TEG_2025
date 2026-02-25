@@ -25,7 +25,7 @@ class UpdateStatus:
 
 
 async def update_api_key(e: me.ClickEvent):
-    yield  # Allow UI to update
+    yield
 
     state = me.state(AppState)
     update_status = me.state(UpdateStatus)
@@ -35,12 +35,11 @@ async def update_api_key(e: me.ClickEvent):
         if success:
             update_status.show_success = True
 
-            # Hide success message after 3 seconds
             yield
             await asyncio.sleep(3)
             update_status.show_success = False
 
-    yield  # Allow UI to update after operation completes
+    yield
 
 
 def settings_page_content():
@@ -49,7 +48,7 @@ def settings_page_content():
     app_state = me.state(AppState)
     update_status = me.state(UpdateStatus)
 
-    with page_scaffold():  # pylint: disable=not-context-manager
+    with page_scaffold():
         with page_frame():
             with header('Settings', 'settings'):
                 pass
@@ -61,7 +60,6 @@ def settings_page_content():
                         gap=30,
                     )
             ):
-                # API Key Settings Section
                 if not app_state.uses_vertex_ai:
                     with me.box(
                             style=me.Style(
@@ -106,7 +104,6 @@ def settings_page_content():
                                 ),
                             )
 
-                        # Success message
                         if update_status.show_success:
                             with me.box(
                                     style=me.Style(
@@ -142,13 +139,11 @@ def settings_page_content():
                                     ),
                                 )
 
-                    # Add spacing instead of divider with style
                     with me.box(
                             style=me.Style(margin=me.Margin(top=10, bottom=10))
                     ):
                         me.divider()
 
-                # Output Types Section
                 me.select(
                     label='Supported Output Types',
                     options=[

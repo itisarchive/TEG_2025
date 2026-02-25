@@ -15,18 +15,15 @@ def on_api_key_change(e: me.InputBlurEvent):
 
 async def save_api_key(e: me.ClickEvent):
     """Save API key and close dialog"""
-    yield  # Yield to allow UI update
+    yield
 
     state = me.state(AppState)
 
-    # Validate API key is not empty
     if not state.api_key.strip():
         return
 
-    # Set the environment variable for current process
     os.environ['GOOGLE_API_KEY'] = state.api_key
 
-    # Update the API key in the server
     await UpdateApiKey(state.api_key)
 
     state.api_key_dialog_open = False

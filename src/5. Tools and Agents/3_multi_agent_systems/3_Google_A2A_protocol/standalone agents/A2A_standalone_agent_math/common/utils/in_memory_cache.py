@@ -39,7 +39,6 @@ class InMemoryCache:
         if not self._initialized:
             with self._lock:
                 if not self._initialized:
-                    # print("Initializing SessionCache storage")
                     self._cache_data: dict[str, dict[str, Any]] = {}
                     self._ttl: dict[str, float] = {}
                     self._data_lock: threading.Lock = threading.Lock()

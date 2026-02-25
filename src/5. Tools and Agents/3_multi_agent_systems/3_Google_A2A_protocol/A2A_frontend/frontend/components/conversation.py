@@ -50,7 +50,6 @@ async def send_message(message: str, message_id: str = ''):
             'conversation_name': c.name if c else '',
         },
     )
-    # Add message to state until refresh replaces it.
     state_message = convert_message_to_state(request)
     if not app_state.messages:
         app_state.messages = []
@@ -67,7 +66,7 @@ async def send_message(message: str, message_id: str = ''):
     response = await SendMessage(request)
 
 
-async def send_message_enter(e: me.InputEnterEvent):  # pylint: disable=unused-argument
+async def send_message_enter(e: me.InputEnterEvent):
     """Send message handler"""
     yield
     state = me.state(PageState)
@@ -80,7 +79,7 @@ async def send_message_enter(e: me.InputEnterEvent):  # pylint: disable=unused-a
     yield
 
 
-async def send_message_button(e: me.ClickEvent):  # pylint: disable=unused-argument
+async def send_message_button(e: me.ClickEvent):
     """Send message button handler"""
     yield
     state = me.state(PageState)

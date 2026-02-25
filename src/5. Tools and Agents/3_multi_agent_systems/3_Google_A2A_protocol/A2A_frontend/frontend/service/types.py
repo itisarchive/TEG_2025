@@ -21,7 +21,6 @@ class Conversation(BaseModel):
 class Event(BaseModel):
     id: str
     actor: str = ''
-    # TODO: Extend to support internal concepts for models, like function calls.
     content: Message
     timestamp: float
 
@@ -33,7 +32,6 @@ class SendMessageRequest(JSONRPCRequest):
 
 class ListMessageRequest(JSONRPCRequest):
     method: Literal['message/list'] = 'message/list'
-    # This is the conversation id
     params: str
 
 
@@ -92,7 +90,6 @@ class ListTaskResponse(JSONRPCResponse):
 
 class RegisterAgentRequest(JSONRPCRequest):
     method: Literal['agent/register'] = 'agent/register'
-    # This is the base url of the agent card
     params: str | None = None
 
 

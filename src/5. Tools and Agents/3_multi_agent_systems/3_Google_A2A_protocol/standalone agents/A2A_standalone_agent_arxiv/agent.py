@@ -11,11 +11,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
 
-# Load configuration
 with open("agent_config.toml", "rb") as f:
     config = tomli.load(f)
 
-# Load environment variables
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,19 +32,14 @@ class ResponseFormat(BaseModel):
     message: str
 
 
-# Get the agent class name from config
 agent_name = config["agent"]["name"]
 
 
-# Define the agent class with the name from config
 class Agent:
-    # Read system instruction from config
     SYSTEM_INSTRUCTION = config["agent"]["system_instruction"]
-    # Read supported content types from config
     SUPPORTED_CONTENT_TYPES = config["agent"]["supported_content_types"]
 
     def __init__(self):
-        # Read model configuration from config
         self.model = ChatOpenAI(
             model=config["model"]["name"],
             temperature=config["model"]["temperature"]

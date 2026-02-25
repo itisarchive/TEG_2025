@@ -14,7 +14,7 @@ from utils.agent_card import get_agent_card
 def agent_list_page(app_state: AppState):
     """Agents List Page"""
     state = me.state(AgentState)
-    with page_scaffold():  # pylint: disable=not-context-manager
+    with page_scaffold():
         with page_frame():
             with header('Remote Agents', 'smart_toy'):
                 pass

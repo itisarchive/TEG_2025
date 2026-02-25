@@ -263,7 +263,7 @@ class InMemoryTaskManager(TaskManager):
                     raise ValueError('Task not found for resubscription')
                 self.task_sse_subscribers[task_id] = []
 
-            sse_event_queue = asyncio.Queue(maxsize=0)  # <=0 is unlimited
+            sse_event_queue = asyncio.Queue(maxsize=0)
             self.task_sse_subscribers[task_id].append(sse_event_queue)
             return sse_event_queue
 

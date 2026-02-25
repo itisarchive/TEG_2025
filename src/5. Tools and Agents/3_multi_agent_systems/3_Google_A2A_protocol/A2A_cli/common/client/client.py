@@ -63,7 +63,6 @@ class A2AClient:
     async def _send_request(self, request: JSONRPCRequest) -> dict[str, Any]:
         async with httpx.AsyncClient() as client:
             try:
-                # Image generation could take time, adding timeout
                 response = await client.post(
                     self.url, json=request.model_dump(), timeout=self.timeout
                 )

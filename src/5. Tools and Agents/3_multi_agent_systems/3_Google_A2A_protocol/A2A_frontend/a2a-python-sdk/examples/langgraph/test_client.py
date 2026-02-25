@@ -43,7 +43,6 @@ async def run_single_turn_test(client: A2AClient) -> None:
     """Runs a single-turn non-streaming test."""
 
     send_payload = create_send_message_payload('how much is 10 USD in CAD?')
-    # Send Message
     send_response: SendMessageResponse = await client.send_message(
         payload=send_payload
     )
@@ -58,7 +57,6 @@ async def run_single_turn_test(client: A2AClient) -> None:
 
     task_id: str = send_response.root.result.id
     print('---Query Task---')
-    # query the task
     task_id_payload = {'id': task_id}
     get_response: GetTaskResponse = await client.get_task(
         payload=task_id_payload
@@ -82,7 +80,6 @@ async def run_streaming_test(client: A2AClient) -> None:
 async def run_multi_turn_test(client: A2AClient) -> None:
     """Runs a multi-turn non-streaming test."""
     print('--- Multi-Turn Request ---')
-    # --- First Turn ---
 
     first_turn_payload = create_send_message_payload('how much is 100 USD?')
     first_turn_response: SendMessageResponse = await client.send_message(
@@ -95,9 +92,8 @@ async def run_multi_turn_test(client: A2AClient) -> None:
             first_turn_response.root, SendMessageSuccessResponse
     ) and isinstance(first_turn_response.root.result, Task):
         task: Task = first_turn_response.root.result
-        context_id: str = task.contextId  # Capture session ID
+        context_id: str = task.contextId
 
-        # --- Second Turn (if input required) ---
         if task.status.state == TaskState.input_required and context_id:
             print('--- Multi-Turn: Second Turn (Input Required) ---')
             second_turn_payload = create_send_message_payload(

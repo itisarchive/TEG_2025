@@ -65,7 +65,6 @@ def process_streaming_agent_response(
     artifact = None
     message = None
 
-    # responses from this agent can be working/completed/input-required
     if not is_task_complete and not require_user_input:
         task_state = TaskState.working
         message = Message(role=Role.agent, parts=parts, messageId=str(uuid4()))

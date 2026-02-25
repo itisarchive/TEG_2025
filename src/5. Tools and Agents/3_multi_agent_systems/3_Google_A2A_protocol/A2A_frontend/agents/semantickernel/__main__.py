@@ -18,7 +18,6 @@ load_dotenv()
 @click.option('--port', default=10020)
 def main(host, port):
     """Starts the Semantic Kernel Agent server using A2A."""
-    # Build the agent card
     capabilities = AgentCapabilities(streaming=True, pushNotifications=True)
     skill_trip_planning = AgentSkill(
         id='trip_planning_sk',
@@ -48,11 +47,9 @@ def main(host, port):
         skills=[skill_trip_planning],
     )
 
-    # Prepare push notification system
     notification_sender_auth = PushNotificationSenderAuth()
     notification_sender_auth.generate_jwk()
 
-    # Create the server
     task_manager = TaskManager(
         notification_sender_auth=notification_sender_auth
     )

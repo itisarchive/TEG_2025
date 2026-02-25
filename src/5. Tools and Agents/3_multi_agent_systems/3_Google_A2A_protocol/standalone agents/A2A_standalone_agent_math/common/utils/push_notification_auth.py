@@ -132,12 +132,9 @@ class PushNotificationReceiverAuth(PushNotificationAuth):
             await request.json()
         )
         if actual_body_sha256 != decode_token['request_body_sha256']:
-            # Payload signature does not match the digest in signed token.
             raise ValueError('Invalid request body')
 
         if time.time() - decode_token['iat'] > 60 * 5:
-            # Do not allow push-notifications older than 5 minutes.
-            # This is to prevent replay attack.
             raise ValueError('Token is expired')
 
         return True

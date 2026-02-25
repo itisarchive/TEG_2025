@@ -11,10 +11,8 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 load_dotenv(override=True)
-# Initialize FastMCP server
 mcp = FastMCP("tavily")
 
-# Load Tavily API key from environment
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 TAVILY_API_BASE = "https://api.tavily.com"
 
@@ -54,7 +52,6 @@ Score: {result.get('score', 'N/A')}
 """
 
 
-# This tool requires TAVILY_API_KEY environment variable
 @mcp.tool()
 async def search(query: str, max_results: int = 5) -> str:
     """Search the web using Tavily API.
@@ -86,7 +83,6 @@ async def search(query: str, max_results: int = 5) -> str:
     results = [format_search_result(result) for result in response["results"]]
     formatted_results = "\n---\n".join(results)
 
-    # Include answer if available
     if response.get("answer"):
         return f"Answer: {response['answer']}\n\nSearch Results:\n{formatted_results}"
 
@@ -111,7 +107,7 @@ async def search_news(query: str, max_results: int = 5) -> str:
         "include_answer": True,
         "include_images": False,
         "include_raw_content": False,
-        "days": 7  # Last 7 days for news
+        "days": 7
     }
 
     response = await make_tavily_request("search", data)
@@ -125,7 +121,6 @@ async def search_news(query: str, max_results: int = 5) -> str:
     results = [format_search_result(result) for result in response["results"]]
     formatted_results = "\n---\n".join(results)
 
-    # Include answer if available
     if response.get("answer"):
         return f"News Summary: {response['answer']}\n\nNews Results:\n{formatted_results}"
 

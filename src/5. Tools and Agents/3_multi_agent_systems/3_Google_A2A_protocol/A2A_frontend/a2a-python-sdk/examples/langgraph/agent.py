@@ -7,10 +7,10 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables.config import (
     RunnableConfig,
 )
-from langchain_core.tools import tool  # type: ignore
+from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.prebuilt import create_react_agent  # type: ignore
+from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

@@ -57,7 +57,7 @@ class HelloWorldAgentExecutor(AgentExecutor):
             root=SendMessageSuccessResponse(id=request.id, result=message)
         )
 
-    async def on_message_stream(  # type: ignore
+    async def on_message_stream(
             self, request: SendMessageStreamingRequest, task: Task | None
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
         async for chunk in self.agent.stream():
@@ -82,7 +82,7 @@ class HelloWorldAgentExecutor(AgentExecutor):
             )
         )
 
-    async def on_resubscribe(  # type: ignore
+    async def on_resubscribe(
             self, request: TaskResubscriptionRequest, task: Task
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
         yield SendMessageStreamingResponse(

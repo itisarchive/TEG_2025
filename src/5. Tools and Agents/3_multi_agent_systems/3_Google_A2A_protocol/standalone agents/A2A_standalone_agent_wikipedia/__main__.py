@@ -21,7 +21,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load configuration
 with open("agent_config.toml", "rb") as f:
     config = tomli.load(f)
 
@@ -37,13 +36,11 @@ def main(host, port):
                 'GOOGLE_API_KEY environment variable not set.'
             )
 
-        # Create capabilities from config
         capabilities = AgentCapabilities(
             streaming=config["agent_card"]["capabilities"]["streaming"],
             pushNotifications=config["agent_card"]["capabilities"]["pushNotifications"]
         )
 
-        # Create skills from config
         skills = []
         for skill_config in config["agent_card"]["skills"]:
             skill = AgentSkill(
@@ -55,7 +52,6 @@ def main(host, port):
             )
             skills.append(skill)
 
-        # Create agent card from config
         agent_card = AgentCard(
             name=config["agent_card"]["name"],
             description=config["agent_card"]["description"],

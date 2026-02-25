@@ -28,9 +28,6 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-# region Plugin
-
-
 class CurrencyPlugin:
     """A simple currency plugin that leverages Frankfurter for exchange rates.
 
@@ -66,21 +63,11 @@ class CurrencyPlugin:
             return f'Currency API call failed: {e!s}'
 
 
-# endregion
-
-# region Response Format
-
-
 class ResponseFormat(BaseModel):
     """A Response Format model to direct how the model should respond."""
 
     status: Literal['input_required', 'completed', 'error'] = 'input_required'
     message: str
-
-
-# endregion
-
-# region Semantic Kernel Agent
 
 
 class SemanticKernelTravelAgent:
@@ -97,7 +84,6 @@ class SemanticKernelTravelAgent:
 
         model_id = os.getenv('OPENAI_CHAT_MODEL_ID', 'gpt-4.1')
 
-        # Define a CurrencyExchangeAgent to handle currency-related tasks
         currency_exchange_agent = ChatCompletionAgent(
             service=OpenAIChatCompletion(
                 api_key=api_key,
@@ -113,7 +99,6 @@ class SemanticKernelTravelAgent:
             plugins=[CurrencyPlugin()],
         )
 
-        # Define an ActivityPlannerAgent to handle activity-related tasks
         activity_planner_agent = ChatCompletionAgent(
             service=OpenAIChatCompletion(
                 api_key=api_key,
@@ -129,7 +114,6 @@ class SemanticKernelTravelAgent:
             ),
         )
 
-        # Define the main TravelManagerAgent to delegate tasks to the appropriate agents
         self.agent = ChatCompletionAgent(
             service=OpenAIChatCompletion(
                 api_key=api_key,
@@ -167,7 +151,6 @@ class SemanticKernelTravelAgent:
         """
         await self._ensure_thread_exists(session_id)
 
-        # Use SK's get_response for a single shot
         response = await self.agent.get_response(
             messages=user_input,
             thread=self.thread,
@@ -190,7 +173,6 @@ class SemanticKernelTravelAgent:
 
         chunks: list[StreamingChatMessageContent] = []
 
-        # For the sample, to avoid too many messages, only show one "in-progress" message for each task
         tool_call_in_progress = False
         message_in_progress = False
         async for response_chunk in self.agent.invoke_stream(
@@ -274,10 +256,6 @@ class SemanticKernelTravelAgent:
         Args:
             session_id (str): Unique identifier for the session.
         """
-        # Replace check with self.thread.id when
-        # https://github.com/microsoft/semantic-kernel/issues/11535 is fixed
         if self.thread is None or self.thread._thread_id != session_id:
             await self.thread.delete() if self.thread else None
             self.thread = ChatHistoryAgentThread(thread_id=session_id)
-
-# endregion

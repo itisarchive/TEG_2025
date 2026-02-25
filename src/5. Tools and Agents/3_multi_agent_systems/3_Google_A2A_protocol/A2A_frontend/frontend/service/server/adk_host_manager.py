@@ -70,31 +70,25 @@ class ADKHostManager(ApplicationManager):
                 or os.environ.get('GOOGLE_GENAI_USE_VERTEXAI', '').upper() == 'TRUE'
         )
 
-        # Set environment variables based on auth method
         if self.uses_vertex_ai:
             os.environ['GOOGLE_GENAI_USE_VERTEXAI'] = 'TRUE'
 
         elif self.api_key:
-            # Use API key authentication
             os.environ['GOOGLE_GENAI_USE_VERTEXAI'] = 'FALSE'
             os.environ['GOOGLE_API_KEY'] = self.api_key
 
         self._initialize_host()
 
-        # Map of message id to task id
         self._task_map = {}
-        # Map to manage 'lost' message ids until protocol level id is introduced
-        self._next_id = {}  # dict[str, str]: previous message to next message
+        self._next_id = {}
 
     def update_api_key(self, api_key: str):
         """Update the API key and reinitialize the host if needed"""
         if api_key and api_key != self.api_key:
             self.api_key = api_key
 
-            # Only update if not using Vertex AI
             if not self.uses_vertex_ai:
                 os.environ['GOOGLE_API_KEY'] = api_key
-                # Reinitialize host with new API key
                 self._initialize_host()
 
     def _initialize_host(self):
@@ -127,7 +121,6 @@ class ADKHostManager(ApplicationManager):
             )
             if conversation:
                 if conversation.messages:
-                    # Get the last message
                     last_message_id = get_message_id(conversation.messages[-1])
                     if last_message_id:
                         message.metadata.update(
@@ -145,7 +138,6 @@ class ADKHostManager(ApplicationManager):
             if 'conversation_id' in message.metadata
             else None
         )
-        # Now check the conversation and attach the message id.
         conversation = self.get_conversation(conversation_id)
         if conversation:
             conversation.messages.append(message)
@@ -158,11 +150,9 @@ class ADKHostManager(ApplicationManager):
             )
         )
         final_event: GenAIEvent | None = None
-        # Determine if a task is to be resumed.
         session = self._session_service.get_session(
             app_name='A2A', user_id='test_user', session_id=conversation_id
         )
-        # Update state must happen in the event
         state_update = {
             'input_message_metadata': message.metadata,
             'session_id': conversation_id,
@@ -182,7 +172,6 @@ class ADKHostManager(ApplicationManager):
         )
         ):
             state_update['task_id'] = self._task_map[last_message_id]
-        # Need to upsert session state now, only way is to append an event.
         self._session_service.append_event(
             session,
             ADKEvent(
@@ -256,7 +245,6 @@ class ADKHostManager(ApplicationManager):
             self.process_artifact_event(current_task, task)
             self.update_task(current_task)
             return current_task
-        # Otherwise this is a Task, either new or updated
         if not any(filter(lambda x: x.id == task.id, self._tasks)):
             self.attach_message_to_task(task.status.message, task.id)
             self.insert_id_trace(task.status.message)
@@ -357,7 +345,7 @@ class ADKHostManager(ApplicationManager):
                 id=task.id,
                 status=TaskStatus(
                     state=TaskState.SUBMITTED
-                ),  # initialize with submitted
+                ),
                 metadata=task.metadata,
                 artifacts=[],
                 sessionId=conversation_id,
@@ -372,26 +360,20 @@ class ADKHostManager(ApplicationManager):
     ):
         artifact = task_update_event.artifact
         if not artifact.append:
-            # received the first chunk or entire payload for an artifact
             if artifact.lastChunk is None or artifact.lastChunk:
-                # lastChunk bit is missing or is set to true, so this is the entire payload
-                # add this to artifacts
                 if not current_task.artifacts:
                     current_task.artifacts = []
                 current_task.artifacts.append(artifact)
             else:
-                # this is a chunk of an artifact, stash it in temp store for assembling
                 if task_update_event.id not in self._artifact_chunks:
                     self._artifact_chunks[task_update_event.id] = {}
                 self._artifact_chunks[task_update_event.id][artifact.index] = (
                     artifact
                 )
         else:
-            # we received an append chunk, add to the existing temp artifact
             current_temp_artifact = self._artifact_chunks[task_update_event.id][
                 artifact.index
             ]
-            # TODO handle if current_temp_artifact is missing
             current_temp_artifact.parts.extend(artifact.parts)
             if artifact.lastChunk:
                 current_task.artifacts.append(current_temp_artifact)
@@ -446,7 +428,6 @@ class ADKHostManager(ApplicationManager):
             agent_data.url = url
         self._agents.append(agent_data)
         self._host_agent.register_agent_card(agent_data)
-        # Now update the host agent definition
         self._initialize_host()
 
     @property
@@ -503,7 +484,6 @@ class ADKHostManager(ApplicationManager):
             )
         for part in content.parts:
             if part.text:
-                # try parse as data
                 try:
                     data = json.loads(part.text)
                     parts.append(DataPart(data=data))
@@ -525,8 +505,6 @@ class ADKHostManager(ApplicationManager):
                         )
                     )
                 )
-            # These aren't managed by the A2A message structure, these are internal
-            # details of ADK, we will simply flatten these to json representations.
             elif part.video_metadata:
                 parts.append(DataPart(data=part.video_metadata.model_dump()))
             elif part.thought:

@@ -10,13 +10,10 @@ import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-# Load environment variables
 load_dotenv(override=True)
 
-# Initialize FastMCP server
 mcp = FastMCP("weather")
 
-# Constants
 OPENWEATHER_API_BASE = "https://api.openweathermap.org/data/2.5"
 API_KEY = os.getenv("OPENWEATHERMAP_API_KEY")
 
@@ -61,17 +58,14 @@ async def get_forecast(latitude: float, longitude: float) -> str:
     if not data or "list" not in data:
         return "Unable to fetch forecast data for this location."
 
-    # Format the forecast
     city_name = data.get("city", {}).get("name", "Unknown location")
     forecasts = [f"5-Day Forecast for {city_name}:"]
 
-    # Group by day and take one forecast per day (midday forecast)
     seen_dates = set()
     for item in data["list"]:
         date = item["dt_txt"].split()[0]
         time = item["dt_txt"].split()[1]
 
-        # Take midday forecast (12:00:00) or first forecast of the day
         if date not in seen_dates and (time == "12:00:00" or len(seen_dates) < 5):
             seen_dates.add(date)
             weather = item["weather"][0]
@@ -112,7 +106,6 @@ async def get_current_conditions(latitude: float, longitude: float) -> str:
     if not data:
         return "Unable to fetch weather data for this location."
 
-    # Extract weather information
     location_name = data.get("name", "Unknown location")
     weather = data["weather"][0]
     main = data["main"]
@@ -151,7 +144,6 @@ async def get_weather_by_city(city: str, country_code: str = "") -> str:
     if not data:
         return f"Unable to fetch weather data for {city}."
 
-    # Extract weather information
     location_name = data.get("name", city)
     country = data.get("sys", {}).get("country", "")
     weather = data["weather"][0]
@@ -170,5 +162,4 @@ Coordinates: lat={data['coord']['lat']}, lon={data['coord']['lon']}
 
 
 if __name__ == "__main__":
-    # Initialize and run the server
     mcp.run(transport='stdio')

@@ -54,8 +54,6 @@ class RemoteAgentConnections:
                     request.model_dump()
             ):
                 merge_metadata(response.result, request)
-                # For task status updates, we need to propagate metadata and provide
-                # a unique message id.
                 if (
                         hasattr(response.result, 'status')
                         and hasattr(response.result.status, 'message')
@@ -75,11 +73,8 @@ class RemoteAgentConnections:
                 if hasattr(response.result, 'final') and response.result.final:
                     break
             return task
-        # Non-streaming
         response = await self.agent_client.send_task(request.model_dump())
         merge_metadata(response.result, request)
-        # For task status updates, we need to propagate metadata and provide
-        # a unique message id.
         if (
                 hasattr(response.result, 'status')
                 and hasattr(response.result.status, 'message')

@@ -156,10 +156,8 @@ async def UpdateApiKey(api_key: str):
     import httpx
 
     try:
-        # Set the environment variable
         os.environ['GOOGLE_API_KEY'] = api_key
 
-        # Call the update API endpoint
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f'{server_url}/api_key/update', json={'api_key': api_key}
@@ -194,7 +192,6 @@ def convert_conversation_to_state(
 
 
 def convert_task_to_state(task: Task) -> StateTask:
-    # Get the first message as the description
     message = task.history[0] if task.history else None
     last_message = task.history[-1] if task.history else None
     output = (
@@ -265,17 +262,14 @@ def extract_message_conversation(message: Task) -> str:
 def extract_conversation_id(task: Task) -> str:
     if task.sessionId:
         return task.sessionId
-    # Tries to find the first conversation id for the message in the task.
     if (
             task.status.message
             and task.status.message.metadata
             and 'conversation_id' in task.status.message.metadata
     ):
         return task.status.message.metadata['conversation_id']
-    # Now check if maybe the task has conversation id in metadata.
     if task.metadata and 'conversation_id' in task.metadata:
         return task.metadata['conversation_id']
-    # Now check if any artifacts contain a conversation id.
     if not task.artifacts:
         return ''
     for a in task.artifacts:

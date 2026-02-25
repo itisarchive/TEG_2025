@@ -18,21 +18,21 @@ def on_blur_set_name(e: me.InputBlurEvent):
     state.temp_name = e.value
 
 
-def on_enter_change_name(e: me.components.input.input.InputEnterEvent):  # pylint: disable=unused-argument
+def on_enter_change_name(e: me.components.input.input.InputEnterEvent):
     """Change name button handler"""
     state = me.state(PageState)
     app_state = me.state(AppState)
     app_state.name = state.temp_name
-    app_state.greeting = ''  # reset greeting
+    app_state.greeting = ''
     yield
 
 
-def on_click_change_name(e: me.ClickEvent):  # pylint: disable=unused-argument
+def on_click_change_name(e: me.ClickEvent):
     """Change name button handler"""
     state = me.state(PageState)
     app_state = me.state(AppState)
     app_state.name = state.temp_name
-    app_state.greeting = ''  # reset greeting
+    app_state.greeting = ''
     yield
 
 

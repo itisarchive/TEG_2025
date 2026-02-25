@@ -270,7 +270,6 @@ class AgentTaskManager(InMemoryTaskManager):
     async def set_push_notification_info(
             self, task_id: str, push_notification_config: PushNotificationConfig
     ):
-        # Verify the ownership of notification URL by issuing a challenge request.
         is_verified = (
             await self.notification_sender_auth.verify_push_notification_url(
                 push_notification_config.url

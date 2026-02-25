@@ -223,7 +223,6 @@ class A2AApplication:
             A Starlette JSONResponse or EventSourceResponse.
         """
         if isinstance(handler_result, AsyncGenerator):
-            # Result is a stream of SendMessageStreamingResponse objects
             async def event_generator(
                     stream: AsyncGenerator[SendMessageStreamingResponse, None],
             ) -> AsyncGenerator[dict[str, str], None]:

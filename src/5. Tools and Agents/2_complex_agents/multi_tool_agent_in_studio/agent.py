@@ -1,6 +1,5 @@
 import os
 
-# Load environment variables
 from dotenv import load_dotenv
 from langchain_community.agent_toolkits.load_tools import load_tools
 from langchain_community.tools import WikipediaQueryRun
@@ -94,15 +93,3 @@ graph = create_react_agent(
     prompt=prompt,
 )
 
-# app = graph.compile()
-# q1 = "What's 2**3?"
-# q2 = "Tell me about Paris"
-# q3 = "What is the weather in Paris?"
-# q4 = "What are the current advances in quantum computing?"
-
-# sessionId = "session_1"
-# config = {'configurable': {'thread_id': sessionId}}
-
-# response = graph.invoke({'messages': [('user', q4)]}, config)
-
-# print(response)

@@ -173,7 +173,7 @@ class DefaultA2ARequestHandler(A2ARequestHandler):
 
         return response
 
-    async def on_message_send_stream(  # type: ignore
+    async def on_message_send_stream(
             self,
             request: SendMessageStreamingRequest,
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
@@ -206,7 +206,7 @@ class DefaultA2ARequestHandler(A2ARequestHandler):
             )
         )
 
-    async def on_resubscribe_to_task(  # type: ignore
+    async def on_resubscribe_to_task(
             self, request: TaskResubscriptionRequest
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
         """Default handler for 'tasks/resubscribe'."""
@@ -220,14 +220,11 @@ class DefaultA2ARequestHandler(A2ARequestHandler):
             task: Task | None,
             request: TaskResubscriptionRequest | SendMessageStreamingRequest,
     ) -> AsyncGenerator[SendMessageStreamingResponse, None]:
-        # create a sse_queue that allows streaming responses back to the user
         sse_queue: StreamingResponseQueue = StreamingResponseQueue()
 
-        # spawn a task for running the streaming agent
         streaming_task = asyncio.create_task(
             self._execute_streaming_agent_task(sse_queue, task, request)
         )
-        # RUF006 - requires saving a reference to the asyncio.task to prevent GC
         self.background_streaming_tasks.add(streaming_task)
         streaming_task.add_done_callback(
             self.background_streaming_tasks.discard
@@ -238,7 +235,6 @@ class DefaultA2ARequestHandler(A2ARequestHandler):
                 await sse_queue.dequeue_event()
             )
             yield event
-            # end the stream on error or TaskStatusUpdateEvent.final = true or Message.final = true
             if isinstance(event.root, JSONRPCErrorResponse) or (
                     (
                             isinstance(event.root.result, TaskStatusUpdateEvent)
@@ -270,9 +266,9 @@ class DefaultA2ARequestHandler(A2ARequestHandler):
                     return
                 agent_response: AsyncGenerator[
                     SendMessageStreamingResponse, None
-                ] = self.agent_executor.on_resubscribe(request, task)  # type: ignore
+                ] = self.agent_executor.on_resubscribe(request, task)
             else:
-                agent_response = self.agent_executor.on_message_stream(  # type: ignore
+                agent_response = self.agent_executor.on_message_stream(
                     request, task
                 )
 
@@ -304,7 +300,6 @@ class DefaultA2ARequestHandler(A2ARequestHandler):
                 f'Error during streaming task execution for task {task.id if task else "unknown"}: {e}',
                 exc_info=True,
             )
-            # Ensure an error response is sent back if the stream fails unexpectedly
             error_response = SendMessageStreamingResponse(
                 root=JSONRPCErrorResponse(
                     id=request.id,

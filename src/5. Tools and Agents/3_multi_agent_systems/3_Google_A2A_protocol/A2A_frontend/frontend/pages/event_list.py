@@ -10,7 +10,7 @@ from state.state import AppState
 def event_list_page(app_state: AppState):
     """Agents List Page"""
     state = me.state(AgentState)
-    with page_scaffold():  # pylint: disable=not-context-manager
+    with page_scaffold():
         with page_frame():
             with header('Event List', 'list'):
                 pass

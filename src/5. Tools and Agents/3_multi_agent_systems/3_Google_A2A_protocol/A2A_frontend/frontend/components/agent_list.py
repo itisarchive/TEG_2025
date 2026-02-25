@@ -72,7 +72,7 @@ def agents_list(
             me.icon(icon='upload')
 
 
-def add_agent(e: me.ClickEvent):  # pylint: disable=unused-argument
+def add_agent(e: me.ClickEvent):
     """Import agent button handler."""
     state = me.state(AgentState)
     state.agent_dialog_open = True

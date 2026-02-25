@@ -65,7 +65,6 @@ class InMemoryFakeAgentManager(ApplicationManager):
             if 'conversation_id' in message.metadata
             else None
         )
-        # Now check the conversation and attach the message id.
         conversation = self.get_conversation(conversation_id)
         if conversation:
             conversation.messages.append(message)
@@ -77,9 +76,6 @@ class InMemoryFakeAgentManager(ApplicationManager):
                 timestamp=datetime.datetime.now(datetime.UTC).timestamp(),
             )
         )
-        # Now actually process the message. If the response is async, return None
-        # for the message response and the updated message information for the
-        # incoming message (with ids attached).
         task_id = str(uuid.uuid4())
         task = Task(
             id=task_id,
@@ -110,7 +106,6 @@ class InMemoryFakeAgentManager(ApplicationManager):
             )
         )
         self._pending_message_ids.remove(message.metadata['message_id'])
-        # Now clean up the task
         if task:
             task.status.state = TaskState.COMPLETED
             task.artifacts = [Artifact(name='response', parts=response.parts)]
@@ -200,8 +195,6 @@ class InMemoryFakeAgentManager(ApplicationManager):
         return self._events
 
 
-# This represents the pre-canned responses that will be returned in order.
-# Extend this list to test more functionality of the UI
 _message_queue: list[Message] = [
     Message(role='agent', parts=[TextPart(text='Hello')]),
     Message(
