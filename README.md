@@ -1,6 +1,6 @@
-<h1 align="center">
+<h1 style="text-align: center;">
   <div>
-    <img width="80" src="https://raw.githubusercontent.com/itischrisd/itis-PJATK/main/logo.svg" alt="" />
+    <img width="80" src="https://raw.githubusercontent.com/itischrisd/itis-PJATK/main/logo.svg" alt="PJAIT logo" />
   </div>
   TEG (Generative Technologies)
 </h1>
