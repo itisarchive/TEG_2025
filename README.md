@@ -1,9 +1,11 @@
-<h1 style="text-align: center;">
+<header style="display: flex; flex-direction: column; align-items: center; text-align: center;">
   <div>
-    <img width="80" src="https://raw.githubusercontent.com/itischrisd/itis-PJATK/main/logo.svg" alt="PJAIT logo" />
+    <img width="80" src="https://raw.githubusercontent.com/itischrisd/itis-PJATK/main/logo.svg" alt="PJATK Logo" />
   </div>
-  TEG (Generative Technologies)
-</h1>
+  <h1>
+    TEG (Generative Technologies)
+  </h1>
+</header>
 
 Repository that contains solutions to the exercises for the TEG (Generative Technologies) practical classes, taught by
 Adrian Stańdo during studies on [PJAIT](https://www.pja.edu.pl/en/).
