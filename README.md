@@ -19,6 +19,11 @@ a pull request.
 
 ---
 
+Final project assignment was part of the course and can be found as a separate
+repository [here](https://github.com/itischrisd/TalentMatchAI).
+
+---
+
 Original description:
 
 # GenAI Course 2025
